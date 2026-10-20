@@ -1,9 +1,0 @@
-Metadata-Version: 2.4
-Name: gameplatform-sdk
-Version: 0.2.0
-Summary: Python SDK for Stream RL environments over official OpenEnv WebSockets
-Requires-Python: >=3.10
-Requires-Dist: numpy
-Requires-Dist: requests
-Requires-Dist: gymnasium>=1.1
-Requires-Dist: openenv==0.4.1

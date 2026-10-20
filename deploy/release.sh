@@ -38,7 +38,9 @@ status=starting
 for _ in $(seq 1 60); do
   status="$(docker inspect -f '{{.State.Health.Status}}' "$CONTAINER" 2>/dev/null || echo missing)"
   case "$status" in
-    healthy) echo "deployed $RELEASE: $CONTAINER healthy"; exit 0 ;;
+    healthy)
+      echo "$RELEASE" > deploy/CURRENT_RELEASE
+      echo "deployed $RELEASE: $CONTAINER healthy"; exit 0 ;;
     unhealthy) break ;;
   esac
   sleep 3
