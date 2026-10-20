@@ -72,12 +72,13 @@ jobs:
              && cd '$DEPLOY_PATH' && sh deploy/release.sh '$image' '$VERSION'; \
              rc=\$?; docker logout ghcr.io >/dev/null; exit \$rc"
 
+      # Cloudflare 会对 GitHub runner 的机房 IP 返回 403，所以从服务器上走公网
+      # （Cloudflare → tunnel → web 完整链路）检查。
       - name: Check public endpoint
         if: ${{ vars.PUBLIC_URL != '' }}
+        env:
+          PUBLIC_URL: ${{ vars.PUBLIC_URL }}
         run: |
-          for i in $(seq 1 10); do
-            if curl -fsS "${{ vars.PUBLIC_URL }}/api/ready"; then echo; exit 0; fi
-            sleep 6
-          done
-          echo "public /api/ready failed" >&2
-          exit 1
+          ssh "$TARGET" "for i in \$(seq 1 10); do \
+            curl -fsS -m 10 '$PUBLIC_URL/api/ready' && echo && exit 0; sleep 6; done; \
+            echo 'public /api/ready failed' >&2; exit 1"

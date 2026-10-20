@@ -23,8 +23,11 @@ if docker ps --format '{{.Names}}' | grep -qx "$CONTAINER"; then
   sh deploy/backup.sh 14
 fi
 
+# 重复部署同一镜像时不覆盖已有的 before 标签，回滚目标保持不变。
 PREV=""
-if docker image inspect gameplatform:latest >/dev/null 2>&1; then
+CUR_ID="$(docker image inspect -f '{{.Id}}' gameplatform:latest 2>/dev/null || true)"
+NEW_ID="$(docker image inspect -f '{{.Id}}' "$IMAGE")"
+if [ -n "$CUR_ID" ] && [ "$CUR_ID" != "$NEW_ID" ]; then
   PREV="gameplatform:before-$RELEASE"
   docker tag gameplatform:latest "$PREV"
   echo "previous image kept as $PREV"
