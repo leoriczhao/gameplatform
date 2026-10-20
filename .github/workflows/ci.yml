@@ -95,11 +95,13 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # 与 docker-compose.yml 相同的安全选项：非 root、只读 rootfs、no-new-privileges。
+      # 与 docker-compose.yml 相同的安全选项：非 root、只读 rootfs、no-new-privileges，
+      # 数据库放在命名卷 /data（新卷继承镜像里 appuser 的目录权限）。
       - name: Start container and wait for /api/ready
         run: |
           docker run -d --name gp-smoke --init --read-only --tmpfs /tmp \
-            --security-opt no-new-privileges:true -p 127.0.0.1:18080:8080 gameplatform:ci
+            --security-opt no-new-privileges:true -v gp-smoke-data:/data \
+            -p 127.0.0.1:18080:8080 gameplatform:ci
           for i in $(seq 1 40); do
             if curl -fsS http://127.0.0.1:18080/api/ready; then echo; exit 0; fi
             sleep 3
