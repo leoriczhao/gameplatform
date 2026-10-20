@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>UgPlay layout mock · CHANGE-20261016</title>
+<style>
+  :root {
+    --bg: #fafafa;
+    --surface: #ffffff;
+    --ink: #19191c;
+    --muted: #71717a;
+    --border: #e4e4e7;
+    --accent: #4F46E5;
+    --accent-soft: #eef2ff;
+    --board-a: #f4f4f5;
+    --board-b: #ebebee;
+    --snake-bg: #f8fafc;
+    --header-offset: 56px;
+    --side-w: 300px;
+    --frame-max-h: min(70vh, 640px);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.45;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  /* faux AppShell */
+  .shell-bar {
+    position: sticky; top: 0; z-index: 20;
+    height: var(--header-offset);
+    display: flex; align-items: center; gap: 1rem;
+    padding: 0 1.25rem;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    font-size: 0.875rem;
+  }
+  .shell-bar strong { letter-spacing: -0.02em; }
+  .shell-bar nav { display: flex; gap: 0.75rem; color: var(--muted); }
+  .shell-bar .spacer { flex: 1; }
+
+  .page {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 1.25rem 1.25rem 3rem;
+  }
+
+  .page-header {
+    display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0.75rem 1rem;
+    margin-bottom: 1.25rem;
+  }
+  .page-header h1 {
+    margin: 0; font-size: 1.25rem; font-weight: 650;
+  }
+  .page-header .desc { margin: 0.15rem 0 0; color: var(--muted); font-size: 0.875rem; }
+  .page-header .actions {
+    margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem;
+  }
+
+  .badge {
+    display: inline-flex; align-items: center;
+    padding: 0.15rem 0.5rem; border-radius: 999px;
+    font-size: 0.75rem; font-weight: 500;
+    background: #f4f4f5; color: var(--ink); border: 1px solid var(--border);
+  }
+  .badge.accent { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+
+  .btn {
+    display: inline-flex; align-items: center; gap: 0.35rem;
+    padding: 0.4rem 0.75rem; border-radius: 0.5rem;
+    font-size: 0.875rem; font-weight: 500; cursor: pointer;
+    border: 1px solid transparent; background: var(--accent); color: #fff;
+  }
+  .btn:hover { filter: brightness(0.95); }
+  .btn.secondary { background: #f4f4f5; color: var(--ink); border-color: var(--border); }
+  .btn.outline { background: var(--surface); color: var(--ink); border-color: var(--border); }
+  .btn.ghost { background: transparent; color: var(--muted); border-color: transparent; }
+  .btn.ghost:hover { color: var(--ink); background: #f4f4f5; }
+  .btn.sm { padding: 0.3rem 0.65rem; font-size: 0.8125rem; }
+
+  .stat {
+    display: flex; flex-direction: column; align-items: flex-end;
+    font-size: 0.75rem; color: var(--muted);
+  }
+  .stat b { font-size: 1.1rem; color: #059669; font-variant-numeric: tabular-nums; }
+
+  /* ===== UgPlayGrid ===== */
+  .ug-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) var(--side-w);
+    gap: 1.25rem;
+    align-items: start;
+  }
+  @media (max-width: 800px) {
+    .ug-grid { grid-template-columns: 1fr; }
+    .side-col { position: static; max-height: none; }
+  }
+
+  .board-col {
+    display: flex; flex-direction: column; align-items: center; gap: 0.85rem;
+    min-width: 0;
+  }
+
+  /* BoardFrame: viewport max + internal scale host */
+  .board-frame {
+    width: 100%;
+    max-width: 100%;
+    max-height: var(--frame-max-h);
+    overflow: hidden;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 0.75rem;
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
+    padding: 0.75rem;
+  }
+  .board-scaler {
+    /* JS sets --scale; transform from center */
+    transform: scale(var(--scale, 1));
+    transform-origin: center center;
+  }
+
+  .grid-board {
+    display: grid;
+    gap: 1px;
+    background: var(--border);
+    border: 1px solid var(--border);
+  }
+  .grid-board .cell {
+    width: var(--cell, 28px);
+    height: var(--cell, 28px);
+    background: var(--board-a);
+  }
+  .grid-board .cell:nth-child(odd) { background: var(--board-b); }
+  .grid-board.snake-skin {
+    background: var(--snake-bg);
+    gap: 0;
+    border-radius: 0.35rem;
+  }
+  .grid-board.snake-skin .cell {
+    background: var(--snake-bg);
+    border: 1px solid #e2e8f0;
+  }
+  .grid-board.snake-skin .cell.snake { background: #4F46E5; border-color: #4338ca; }
+  .grid-board.snake-skin .cell.food { background: #f59e0b; border-color: #d97706; }
+
+  .login-gate {
+    width: 100%;
+    max-width: 420px;
+    padding: 0.85rem 1rem;
+    border-radius: 0.65rem;
+    background: var(--accent-soft);
+    border: 1px solid #c7d2fe;
+    color: var(--ink);
+    font-size: 0.875rem;
+  }
+  .login-gate .btn { margin-top: 0.55rem; }
+
+  .side-col {
+    position: sticky;
+    top: calc(var(--header-offset) + 12px);
+    max-height: calc(100vh - var(--header-offset) - 24px);
+    overflow-y: auto;
+    display: flex; flex-direction: column; gap: 0.75rem;
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 0.75rem;
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
+    padding: 0.85rem 1rem;
+  }
+  .card h2 {
+    margin: 0 0 0.65rem;
+    font-size: 0.95rem;
+    display: flex; align-items: center; gap: 0.4rem;
+  }
+  .rank-list { list-style: none; margin: 0; padding: 0; }
+  .rank-list li {
+    display: flex; align-items: center; gap: 0.5rem;
+    padding: 0.4rem 0;
+    border-bottom: 1px solid #f4f4f5;
+    font-size: 0.875rem;
+  }
+  .rank-list li:last-child { border-bottom: 0; }
+  .rank-list .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rank-list b { font-variant-numeric: tabular-nums; }
+
+  .note {
+    margin: 2rem 0 0.75rem;
+    padding: 0.75rem 1rem;
+    background: #fff;
+    border: 1px dashed var(--border);
+    border-radius: 0.5rem;
+    font-size: 0.8125rem;
+    color: var(--muted);
+  }
+  .section-label {
+    margin: 2.5rem 0 0.75rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+  }
+  .dropped {
+    opacity: 0.45;
+    text-decoration: line-through;
+    font-size: 0.8rem;
+    color: var(--muted);
+  }
+</style>
+</head>
+<body>
+  <div class="shell-bar">
+    <strong>Stream</strong>
+    <nav>
+      <a href="#">大厅</a>
+      <a href="#">模型托管</a>
+      <a href="#">API 文档</a>
+    </nav>
+    <span class="spacer"></span>
+    <button class="btn sm secondary" type="button">登录</button>
+  </div>
+
+  <!-- ========== A: microrts-sized (16×16) guest ========== -->
+  <div class="page" id="microrts">
+    <p class="section-label">A · Guest · microrts 16×16（大棋盘 → 内部缩放，侧栏 sticky）</p>
+
+    <div class="page-header">
+      <div>
+        <h1>MicroRTS · UGC</h1>
+        <p class="desc">验证支线「网页玩」· 游客预览</p>
+      </div>
+      <div class="actions">
+        <div class="stat"><span>得分</span><b>0</b></div>
+        <button class="btn sm secondary" type="button">⚔ 去对战</button>
+        <span class="badge">UGC</span>
+        <button class="btn sm ghost" type="button">← 大厅</button>
+      </div>
+    </div>
+
+    <div class="ug-grid">
+      <div class="board-col">
+        <div class="board-frame" data-frame>
+          <div class="board-scaler" data-scaler>
+            <div class="grid-board" id="board-micro" style="--cell:28px" data-board data-cols="16" data-rows="16"></div>
+          </div>
+        </div>
+        <span class="badge accent">棋盘预览（登录后可操作）</span>
+        <div class="login-gate">
+          上面是初始棋盘预览；登录后才能对局并上榜。
+          <br />
+          <button class="btn sm" type="button">登录 / 注册</button>
+        </div>
+      </div>
+
+      <aside class="side-col">
+        <div class="card">
+          <h2>🏆 排行榜</h2>
+          <ul class="rank-list">
+            <li><span class="badge">#1</span><span class="name">alpha</span><b>1280</b></li>
+            <li><span class="badge">#2</span><span class="name">bravo</span><b>1102</b></li>
+            <li><span class="badge">#3</span><span class="name">charlie</span><b>980</b></li>
+            <li><span class="badge">#4</span><span class="name">delta</span><b>860</b></li>
+            <li><span class="badge">#5</span><span class="name">echo</span><b>720</b></li>
+            <li><span class="badge">#6</span><span class="name">foxtrot</span><b>640</b></li>
+            <li><span class="badge">#7</span><span class="name">golf</span><b>510</b></li>
+            <li><span class="badge">#8</span><span class="name">hotel</span><b>400</b></li>
+          </ul>
+        </div>
+        <!-- DROPPED: second login card -->
+        <p class="dropped">弃用：侧栏「游客也可游玩与上榜」登录卡</p>
+        <a class="btn sm outline" href="/models">去模型托管发起挑战</a>
+        <a class="btn sm ghost" href="/ugc">上传我的游戏</a>
+      </aside>
+    </div>
+
+    <p class="note">
+      本页<strong>无</strong>底部「模型挑战」空壳。挑战主路径 → <code>/models</code>。
+      棋盘区 <code>max-height: min(70vh, 640px)</code> + JS 算 <code>--scale</code>；侧栏独立滚。
+    </p>
+  </div>
+
+  <!-- ========== B: snake-sized (smaller) guest ========== -->
+  <div class="page" id="snake">
+    <p class="section-label">B · Guest · snake 较小棋盘（无大片留白；侧栏顶对齐）</p>
+
+    <div class="page-header">
+      <div>
+        <h1>Snake · UGC</h1>
+        <p class="desc">同壳规则 · 小棋盘不人为垫高左栏</p>
+      </div>
+      <div class="actions">
+        <div class="stat"><span>得分</span><b>0</b></div>
+        <button class="btn sm secondary" type="button">⚔ 去对战</button>
+        <span class="badge">UGC</span>
+        <button class="btn sm ghost" type="button">← 大厅</button>
+      </div>
+    </div>
+
+    <div class="ug-grid">
+      <div class="board-col">
+        <div class="board-frame" data-frame>
+          <div class="board-scaler" data-scaler>
+            <div class="grid-board snake-skin" id="board-snake" style="--cell:24px" data-board data-cols="12" data-rows="12"></div>
+          </div>
+        </div>
+        <span class="badge accent">棋盘预览（登录后可操作）</span>
+        <div class="login-gate">
+          上面是初始棋盘预览；登录后才能对局并上榜。
+          <br />
+          <button class="btn sm" type="button">登录 / 注册</button>
+        </div>
+      </div>
+
+      <aside class="side-col">
+        <div class="card">
+          <h2>🏆 排行榜</h2>
+          <ul class="rank-list">
+            <li><span class="badge">#1</span><span class="name">ssss</span><b>42</b></li>
+            <li><span class="badge">#2</span><span class="name">nibble</span><b>31</b></li>
+            <li><span class="badge">#3</span><span class="name">coil</span><b>18</b></li>
+          </ul>
+        </div>
+        <a class="btn sm outline" href="/models">去模型托管发起挑战</a>
+        <a class="btn sm ghost" href="/ugc">上传我的游戏</a>
+      </aside>
+    </div>
+
+    <p class="note">
+      <code>align-items: start</code> → 小棋盘时左栏高度随内容，不出现「右侧悬空 + 下方空挑战带」。
+      对照现网问题截图：双登录卡 + 模型挑战整卡已从本 mock 拿掉。
+    </p>
+  </div>
+
+<script>
+(function () {
+  function paintBoard(el, opts) {
+    var cols = +el.dataset.cols;
+    var rows = +el.dataset.rows;
+    el.style.gridTemplateColumns = "repeat(" + cols + ", var(--cell))";
+    el.innerHTML = "";
+    var snakeCells = opts && opts.snake;
+    for (var i = 0; i < cols * rows; i++) {
+      var d = document.createElement("div");
+      d.className = "cell";
+      if (snakeCells && snakeCells.indexOf(i) >= 0) d.classList.add("snake");
+      if (opts && opts.food === i) d.classList.add("food");
+      el.appendChild(d);
+    }
+  }
+
+  paintBoard(document.getElementById("board-micro"));
+  paintBoard(document.getElementById("board-snake"), {
+    snake: [5 * 12 + 3, 5 * 12 + 4, 5 * 12 + 5, 5 * 12 + 6],
+    food: 3 * 12 + 9
+  });
+
+  function fitFrames() {
+    document.querySelectorAll("[data-frame]").forEach(function (frame) {
+      var scaler = frame.querySelector("[data-scaler]");
+      var board = frame.querySelector("[data-board]");
+      if (!scaler || !board) return;
+      scaler.style.setProperty("--scale", "1");
+      // natural size
+      var bw = board.offsetWidth;
+      var bh = board.offsetHeight;
+      var fw = frame.clientWidth - 24;
+      var fh = frame.clientHeight - 24;
+      if (bw < 1 || bh < 1 || fw < 1 || fh < 1) return;
+      var s = Math.min(1, fw / bw, fh / bh);
+      scaler.style.setProperty("--scale", String(s));
+    });
+  }
+
+  fitFrames();
+  window.addEventListener("resize", fitFrames);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>历史原型 · Stream 大厅/对战交互（D27）</title>
+<style>
+  :root{ --bg:#f5f6fa; --card:#ffffff; --line:#e5e7eb; --ink:#1f2430; --mut:#6b7280;
+         --brand:#4f46e5; --brand-2:#6366f1; --ring:#c7d2fe; --ok:#059669; --warn:#d97706;
+         --bad:#dc2626; --chip:#eef0f8; }
+  *{ box-sizing:border-box; }
+  body{ margin:0; font-family:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+        background:var(--bg); color:var(--ink); }
+  .topnav{ position:sticky; top:0; z-index:50; display:flex; align-items:center; gap:22px;
+           background:#fff; border-bottom:1px solid var(--line); padding:12px 28px; }
+  .brand{ display:flex; align-items:center; gap:8px; font-weight:800; font-size:17px; }
+  .brand b{ background:linear-gradient(120deg,#4f46e5,#7c3aed); -webkit-background-clip:text;
+            background-clip:text; color:transparent; }
+  .navlink{ color:var(--mut); text-decoration:none; font-size:14px; padding:6px 2px; cursor:pointer;
+            border-bottom:2px solid transparent; }
+  .navlink.on{ color:var(--brand); font-weight:600; border-color:var(--brand); }
+  .navlink.strike{ color:#c6c9d4; text-decoration:line-through; }
+  .navlink.strike small{ text-decoration:none; color:var(--bad); font-size:11px; margin-left:3px; }
+  .spacer{ flex:1; }
+  .pill{ font-size:11px; padding:2px 8px; border-radius:999px; background:var(--chip); color:var(--mut); }
+  main{ max-width:1080px; margin:0 auto; padding:26px 20px 60px; }
+  .hero{ text-align:center; padding:26px 0 22px; }
+  .hero h1{ font-size:30px; margin:6px 0 8px; }
+  .hero .logo{ width:52px; height:52px; margin:0 auto; border-radius:16px;
+               background:linear-gradient(135deg,#4f46e5,#7c3aed); color:#fff; display:flex;
+               align-items:center; justify-content:center; font-size:26px; font-weight:800; }
+  .hero p{ color:var(--mut); font-size:13.5px; margin:0; }
+  .cta{ display:flex; gap:10px; justify-content:center; margin-top:16px; flex-wrap:wrap; }
+  .btn{ border:1px solid var(--line); background:#fff; color:var(--ink); border-radius:12px;
+        padding:9px 16px; font-size:13.5px; font-weight:600; cursor:pointer; transition:.15s; }
+  .btn:hover{ transform:translateY(-1px); box-shadow:0 4px 12px rgba(0,0,0,.07); }
+  .btn.pri{ background:var(--brand); border-color:var(--brand); color:#fff; }
+  .btn.pri:hover{ background:var(--brand-2); }
+  .btn.ghost{ background:transparent; border-color:transparent; color:var(--mut); }
+  .btn.sm{ padding:6px 12px; font-size:12.5px; border-radius:10px; }
+  .btn.green{ background:var(--ok); border-color:var(--ok); color:#fff; }
+  .grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:16px; }
+  .card{ background:var(--card); border:1px solid var(--line); border-radius:18px; padding:18px;
+         transition:.15s; }
+  .card.hover:hover{ transform:translateY(-3px); box-shadow:0 10px 24px rgba(0,0,0,.08); }
+  .card h3{ margin:0 0 4px; font-size:16px; display:flex; align-items:center; gap:8px; }
+  .card p{ margin:6px 0 14px; color:var(--mut); font-size:13px; line-height:1.55; min-height:40px; }
+  .icobox{ width:40px; height:40px; border-radius:12px; display:inline-flex; align-items:center;
+           justify-content:center; font-size:19px; background:var(--chip); }
+  .badges{ display:flex; gap:6px; flex-wrap:wrap; margin-left:auto; }
+  .bd{ font-size:11px; padding:2px 9px; border-radius:999px; font-weight:600; }
+  .bd.pvp{ background:#eef2ff; color:#4f46e5; } .bd.ai{ background:#ecfdf5; color:#059669; }
+  .bd.ct{ background:#fff7ed; color:#d97706; } .bd.ugc{ background:#f3f4f6; color:#6b7280; }
+  .row{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .sec{ display:flex; align-items:center; gap:10px; margin:26px 0 12px; }
+  .sec h2{ font-size:18px; margin:0; } .sec .sub{ color:var(--mut); font-size:12.5px; }
+  .wire{ border:2px dashed var(--warn); border-radius:6px; background:#fffbeb; color:#92400e;
+         font-size:11.5px; padding:5px 9px; margin:10px 0; }
+  .wire.red{ border-color:var(--bad); background:#fef2f2; color:#991b1b; }
+  .wire.grn{ border-color:var(--ok); background:#ecfdf5; color:#065f46; }
+  table{ width:100%; border-collapse:collapse; font-size:13px; }
+  th,td{ text-align:left; padding:9px 10px; border-bottom:1px solid var(--line); }
+  th{ color:var(--mut); font-weight:600; font-size:12px; }
+  .tabs{ display:flex; gap:6px; border-bottom:1px solid var(--line); margin-bottom:16px; }
+  .tab{ padding:9px 16px; font-size:13.5px; cursor:pointer; color:var(--mut); border-bottom:2px solid transparent; }
+  .tab.on{ color:var(--brand); font-weight:600; border-color:var(--brand); }
+  .strip{ display:flex; gap:8px; overflow-x:auto; padding-bottom:6px; }
+  .chip{ display:flex; align-items:center; gap:6px; white-space:nowrap; border:1px solid var(--line);
+         background:#fff; border-radius:12px; padding:8px 14px; font-size:13px; cursor:pointer; }
+  .chip.on{ background:var(--brand); border-color:var(--brand); color:#fff; }
+  .toast{ position:fixed; left:50%; bottom:26px; transform:translateX(-50%);
+          background:#1f2430; color:#fff; font-size:13px; padding:10px 18px; border-radius:12px;
+          box-shadow:0 8px 24px rgba(0,0,0,.25); opacity:0; transition:.25s; pointer-events:none; }
+  .toast.show{ opacity:1; }
+  .foot-note{ position:fixed; left:16px; bottom:14px; max-width:330px; background:#fff;
+              border:1px solid var(--line); border-radius:14px; padding:10px 12px; font-size:11.5px;
+              color:var(--mut); box-shadow:0 6px 18px rgba(0,0,0,.08); }
+  .muted{ color:var(--mut); } .small{ font-size:12.5px; }
+  .empty{ text-align:center; color:var(--mut); font-size:13px; padding:26px 0; border:1px dashed var(--line);
+          border-radius:14px; }
+  .grid2{ display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  @media(max-width:760px){ .grid2{ grid-template-columns:1fr; } }
+  .mono{ font-family:ui-monospace,monospace; font-size:12px; color:var(--brand); }
+  .score{ font-size:15px; font-weight:700; color:var(--ok); }
+  .hint{ font-size:11px; color:var(--mut); margin-top:6px; }
+</style>
+</head>
+<body>
+<aside style="padding:16px 28px;background:#fff3cd;color:#513c06;border-bottom:2px solid #d97706"><strong>历史线框原型，不是当前 API 文档。</strong>以下界面、旧环境链接与提示保留供设计追溯。环境交互已被 <a href="../api/openenv.md">OpenEnv 契约</a>取代（唯一官方入口，无旧 API 兼容）；当前架构见 <a href="../architecture.html">架构总览</a>。</aside>
+
+<header class="topnav">
+  <div class="brand"><div class="icobox" style="width:30px;height:30px;font-size:15px;">▶</div><b>Stream</b></div>
+  <a class="navlink on" data-nav="lobby">大厅</a>
+  <a class="navlink" data-nav="models">模型托管</a>
+  <a class="navlink" data-nav="upload">上传游戏</a>
+  <a class="navlink" data-nav="friends">好友</a>
+  <a class="navlink" data-nav="profile">资料</a>
+  <div class="spacer"></div>
+  <span class="pill">游 5 · 在线 3</span>
+  <a class="navlink" data-nav="docs">API 文档</a>
+</header>
+
+<main id="view"></main>
+
+<div class="foot-note" id="note"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+/* ======== 模拟数据 ======== */
+var GAMES = [
+  { id:"microrts", name:"微RTS · MicroRTS", icon:"⚔️", pvp:true, ai:true, contract:true,
+    desc:"16×16 微型 RTS：采矿 → 兵营 → 爆兵 → 全歼。复合动作（每单位一条指令）。", author:"官方" },
+  { id:"rps", name:"石头剪刀布", icon:"✊", pvp:true, ai:false, contract:false,
+    desc:"经典三选一：PvE 五局三胜打内置随机，PvP 先胜 3 局者赢。", author:"ugcdemo1" },
+  { id:"snake", name:"贪吃蛇", icon:"🐍", pvp:false, ai:true, contract:true,
+    desc:"20×20 网格：吃食物 +1 分，撞墙/撞身死亡。支持模型托管。", author:"官方" },
+  { id:"tetris", name:"俄罗斯方块", icon:"🧱", pvp:false, ai:true, contract:true,
+    desc:"10×20 棋盘：消行得分 1/4/9/16。支持模型托管。", author:"官方" },
+  { id:"guess", name:"猜数字", icon:"🎯", pvp:false, ai:true, contract:false,
+    desc:"20 次内猜中 0-99，每次提示大小，猜得越少分越高。", author:"ugcdemo1" },
+];
+var ROOMS = [
+  { game:"microrts", host:"玩家A", mode:"排位", invite:"M1RTS9", ago:"12秒前" },
+  { game:"microrts", host:"路人乙", mode:"练习", invite:"K2XK41", ago:"48秒前" },
+  { game:"rps", host:"剪刀手", mode:"排位", invite:"RPS007", ago:"1分钟前" },
+];
+var RANK = [
+  { name:"玩家A", rating:1342, games:32, wins:19 },
+  { name:"剪刀手", rating:1288, games:24, wins:13 },
+  { name:"seedadmin", rating:1265, games:18, wins:11 },
+];
+var MATCHES = [
+  { id:17, kind:"pvp", game:"microrts", vs:"玩家A", status:"finished", result:"胜者 玩家A（全歼）", t:"08-17 17:02" },
+  { id:16, kind:"pvp", game:"rps", vs:"剪刀手", status:"finished", result:"胜者 seedadmin（先胜3局）", t:"08-17 16:40" },
+  { id:15, kind:"model", game:"snake", vs:"模型#3 vs 内置 dqn", status:"finished", result:"胜者 内置 dqn（142 tick）", t:"08-17 15:12" },
+];
+
+/* ======== 状态 ======== */
+var S = { nav:"lobby", game:null, pvpTab:"find", modelGame:"snake", playing:false };
+
+/* ======== 工具 ======== */
+function esc(s){ return String(s||""); }
+function toast(m){ var t=document.getElementById("toast"); t.textContent=m; t.classList.add("show");
+  clearTimeout(t._h); t._h=setTimeout(function(){ t.classList.remove("show"); },1800); }
+function badge(g){
+  var h="";
+  if(g.pvp) h+='<span class="bd pvp">⚔️ 可对战</span>';
+  if(g.ai) h+='<span class="bd ai">🧠 内置 AI</span>';
+  if(g.contract) h+='<span class="bd ct">模型契约</span>';
+  if(g.author!=="官方") h+='<span class="bd ugc">UGC · '+esc(g.author)+'</span>';
+  return h;
+}
+function card(g){
+  return '<div class="card hover">'
+    +'<h3><span class="icobox">'+g.icon+'</span>'+esc(g.name)+'<span class="badges">'+badge(g)+'</span></h3>'
+    +'<p>'+esc(g.desc)+'</p>'
+    +'<div class="row">'
+    +'<button class="btn pri sm" data-act="play" data-game="'+g.id+'">进入游戏 →</button>'
+    +(g.pvp?'<button class="btn sm" data-act="pvp" data-game="'+g.id+'">⚔️ 对战</button>':'')
+    +'<button class="btn ghost sm" data-act="info" data-game="'+g.id+'">环境 info</button>'
+    +'</div>'
+    +(g.pvp?'<div class="hint">● 该游戏现有 <!-- -->2 个公开房间（5s 轮询）</div>':'')
+    +'</div>';
+}
+
+/* ======== 视图 ======== */
+function renderLobby(){
+  var list = GAMES.map(card).join("");
+  return '<section class="hero">'
+    +'<div class="logo">▶</div><h1>Stream</h1>'
+    +'<p>每个游戏都提供<strong>无状态环境 API</strong>（离线训练）与<strong>可玩界面</strong>（人工/内置 AI 演示/自定义模型）；<br>支持 PvP 的游戏在卡片上直接有<strong>对战</strong>入口。</p>'
+    +'<div class="cta">'
+    +'<button class="btn pri" onclick="goFirst()">🎮 随便玩一个</button>'
+    +'<button class="btn" data-nav="models">模型托管</button>'
+    +'<button class="btn" data-nav="upload">上传游戏</button>'
+    +'<button class="btn ghost">登录 / 注册</button>'
+    +'</div></section>'
+    +'<div class="wire grn">✅ 设计点：对战中心已撤销；每张游戏卡片自带「⚔️对战」入口（仅 PvP 游戏）；PvE 游戏（贪吃蛇/俄罗斯方块/猜数字）不出现任何对战入口。</div>'
+    +'<div class="grid">'+list+'</div>';
+}
+function goFirst(){ var g=GAMES[0]; S.game=g.id; S.pvpTab="find"; S.playing=false; render(); toast("进入 "+g.name); }
+
+function renderGame(){
+  var g = byId(S.game);
+  return '<div class="row" style="margin-bottom:14px">'
+    +'<button class="btn ghost sm" data-nav="lobby">← 大厅</button>'
+    +'<span class="small muted">'+esc(g.id)+' 单机页 /games/'+esc(g.id)+'</span>'
+    +'<div class="spacer"></div>'
+    +(g.pvp?'<button class="btn sm" data-act="pvp" data-game="'+g.id+'">⚔️ 去对战</button>':'')
+    +'</div>'
+    +'<div class="wire" style="background:#eef2ff;border-color:#c7d2fe;color:#3730a3">'
+    +'🔍 说明：这是「游戏单机页」（现状保留）。PvP 游戏在此增加「⚔️去对战」按钮 → /games/'+esc(g.id)+'/pvp；单机排行榜保留。</div>'
+    +'<div class="grid2">'
+    +'<div class="card"><h3>🎮 游玩区</h3><div class="empty">[棋盘渲染] · [动作输入] · 「内置 AI 演示」</div><div class="hint">提交分数 → 单机榜</div></div>'
+    +'<div class="card"><h3>🏆 单机排行榜</h3><table><tr><th>#</th><th>名字</th><th>分数</th></tr>'
+    +'<tr><td>1</td><td>验收</td><td class="score">80</td></tr><tr><td>2</td><td>高手</td><td class="score">66</td></tr></table></div>'
+    +'</div>';
+}
+
+function renderPvp(){
+  var g = byId(S.game);
+  var tabs = [["find","👥 找对手"],["play","🎮 对局"],["rank","🏆 排行榜"]];
+  var tabhtml = '<div class="row" style="margin-bottom:6px">'
+    +'<button class="btn ghost sm" data-nav="lobby">← 大厅</button>'
+    +'<span class="small muted">'+esc(g.name)+' · PvP /games/'+esc(g.id)+'/pvp</span>'
+    +'<div class="spacer"></div>'
+    +'<button class="btn ghost sm" data-act="play" data-game="'+g.id+'">🎮 回单机页</button></div>'
+    +'<div class="wire grn">✅ 设计点：原「对战中心」的找对手/匹配/排行榜全部下沉到<b>该游戏的 PvP 页</b>；顶部标签切 Tab。</div>'
+    +'<div class="tabs">';
+  for(var i=0;i<tabs.length;i++){
+    tabhtml += '<div class="tab'+(S.pvpTab===tabs[i][0]?" on":"")+'" data-pvptab="'+tabs[i][0]+'">'+tabs[i][1]+'</div>';
+  }
+  tabhtml += '</div>';
+  var body="";
+  if(S.pvpTab==="find"){
+    body = '<div class="grid2">'
+      +'<div class="card"><h3>🕓 公开房间</h3>'
+      +'<table><tr><th>房主</th><th>模式</th><th>邀请码</th><th>时间</th><th></th></tr>';
+    for(var i=0;i<ROOMS.length;i++){ var r=ROOMS[i];
+      if(r.game!==g.id) continue;
+      body += '<tr><td>'+esc(r.host)+'</td><td>'+(r.mode==="排位"?r.mode:"练习")+'</td>'
+        +'<td class="mono">'+r.invite+'</td><td class="muted small">'+r.ago+'</td>'
+        +'<td><button class="btn sm pri" data-act="join">加入</button></td></tr>';
+    }
+    body += '</table><button class="btn sm" style="margin-top:10px" data-act="createRoom">＋ 创建公开房间</button></div>'
+      +'<div class="card"><h3>⚡ 快速匹配</h3><div class="small muted" style="margin-bottom:10px">按 ELO 撮合旗鼓相当的对手；等待越久范围越宽。</div>'
+      +'<div class="row"><button class="btn green sm">开始匹配（排位）</button><button class="btn sm">练习</button></div>'
+      +'<hr style="border:none;border-top:1px solid var(--line);margin:14px 0">'
+      +'<h3>🎟️ 邀请码</h3><div class="row"><button class="btn sm" data-act="createInvite">创建私有房间</button>'
+      +'<span class="muted small">或</span><button class="btn sm">输入邀请码加入</button></div></div>'
+      +'</div>';
+  } else if(S.pvpTab==="play"){
+    body = '<div class="card"><h3>🎮 对局进行中 <span class="pill">'+esc(g.name)+'</span></h3>'
+      +'<div class="empty">[棋盘 + 指令构建器 / 回合动作] <br><span class="muted small">聊天 · 认输 · 重赛 / 邀请码 '+esc(g.id.toUpperCase().slice(0,4))+'K-9F</span></div></div>';
+  } else {
+    body = '<div class="card"><h3>🏆 ELO 排行榜 · '+esc(g.name)+'</h3>'
+      +'<div class="tabs"><div class="tab on">总榜</div><div class="tab">周榜（近7天）</div></div>'
+      +'<table><tr><th>#</th><th>玩家</th><th style="text-align:right">ELO</th><th style="text-align:right">局数</th><th style="text-align:right">胜</th></tr>';
+    for(var i=0;i<RANK.length;i++){ var r=RANK[i];
+      body += '<tr><td>'+(i===0?"🥇":("#"+(i+1)))+'</td><td>'+esc(r.name)+(i===2?"（我）":"")+'</td>'
+        +'<td style="text-align:right"><b>'+r.rating+'</b></td><td style="text-align:right">'+r.games+'</td><td style="text-align:right">'+r.wins+'</td></tr>';
+    }
+    body += '</table></div>';
+  }
+  return tabhtml+body;
+}
+
+function renderModels(){
+  var strips = GAMES.filter(function(g){return g.contract;}).map(function(g){
+    return '<div class="chip'+(S.modelGame===g.id?" on":"")+'" data-modelgame="'+g.id+'">'+g.icon+' '+esc(g.name)+'</div>';
+  }).join("");
+  return '<div class="row" style="margin-bottom:14px"><span class="small muted">模型托管 /models</span></div>'
+    +'<div class="grid2">'
+    +'<div class="card"><h3>⬆️ 上传模型 / 我的模型</h3><div class="empty">[.onnx 上传] · [模型列表] · [单个评估]</div></div>'
+    +'<div class="card"><h3>🤖 模型 vs 模型 挑战（原对战中心迁移至此）</h3>'
+    +'<div class="small muted" style="margin-bottom:8px">选择游戏（仅开放模型契约的游戏）：</div>'
+    +'<div class="strip">'+strips+'</div>'
+    +'<div class="row" style="margin-top:12px"><span class="small">我的模型</span>'
+    +'<select style="padding:6px 10px;border:1px solid var(--line);border-radius:10px"><option>#3 my-dqn</option></select></div>'
+    +'<div class="row" style="margin-top:8px"><span class="small">对手</span>'
+    +'<select style="padding:6px 10px;border:1px solid var(--line);border-radius:10px"><option>内置 AI 策略 dqn</option><option>内置 AI 策略 random</option><option>他人模型 ID…</option></select>'
+    +'<button class="btn pri sm" data-act="challenge">发起挑战</button></div></div>'
+    +'</div>'
+    +'<div class="sec"><h2>📜 挑战记录</h2><span class="sub">PvP 与模型挑战统一记录（含回放/分享）</span></div>'
+    +'<div class="card"><table><tr><th>ID</th><th>类型</th><th>对阵</th><th>状态</th><th>结果</th><th>操作</th><th>时间</th></tr>';
+  var rows="";
+  for(var i=0;i<MATCHES.length;i++){ var m=MATCHES[i];
+    rows += '<tr><td>'+m.id+'</td><td>'+(m.kind==="pvp"?'<span class="bd pvp">人 vs 人</span>':'<span class="bd ct">模型战</span>')+'</td>'
+      +'<td>'+esc(m.vs)+'</td><td><span class="bd ai">finished</span></td><td>'+esc(m.result)+'</td>'
+      +'<td><button class="btn ghost sm">回放</button> <button class="btn ghost sm">分享</button></td><td class="muted small">'+m.t+'</td></tr>';
+  }
+  body = '<div class="wire">🔍 说明：挑战记录（原 Arena「我的对局」）在资料页与模型页展示；这里是 /profile 区块的同数据。</div>'
+  return '<div class="card" style="margin-top:10px"><table><tr><th>ID</th><th>类型</th><th>对阵</th><th>状态</th><th>结果</th><th>操作</th><th>时间</th></tr>'+rows+'</table></div>'+body;
+}
+
+function renderProfile(){
+  var rows="";
+  for(var i=0;i<MATCHES.length;i++){ var m=MATCHES[i];
+    rows += '<tr><td>'+m.id+'</td><td>'+(m.kind==="pvp"?'<span class="bd pvp">人 vs 人</span>':'<span class="bd ct">模型战</span>')+'</td>'
+      +'<td>'+esc(m.game)+'</td><td>'+esc(m.vs)+'</td><td>'+esc(m.result)+'</td>'
+      +'<td><button class="btn ghost sm">回放</button> <button class="btn ghost sm">分享</button></td><td class="muted small">'+m.t+'</td></tr>';
+  }
+  return '<div class="grid2">'
+    +'<div class="card"><h3>👤 seedadmin</h3><div class="row" style="margin-top:6px"><span class="bd ai">LV 1</span><span class="small">ELO 走势（对局数不足）</span></div>'
+    +'<div class="hint">昵称/头像/签名编辑</div></div>'
+    +'<div class="card"><h3>⚔️ 我的对局（原对战中心迁移至此）</h3></div></div>'
+    +'<div class="wire grn">✅ 设计点：Arena 撤销后，「我的对局」区块落在资料页。</div>'
+    +'<div class="card"><table><tr><th>ID</th><th>类型</th><th>游戏</th><th>对阵</th><th>结果</th><th>操作</th><th>时间</th></tr>'+rows+'</table></div>';
+}
+
+/* ======== 无关页面占位 ======== */
+function renderPlaceholder(title){
+  return '<div class="sec"><h2>'+title+'</h2></div>'
+    +'<div class="wire">🔍 说明：本模块不在本次重构范围，仅作导航占位。</div>'
+    +'<div class="empty">（'+title+' 页面 · 原型占位）</div>';
+}
+
+/* ======== 渲染 + 事件 ======== */
+function byId(id){ for(var i=0;i<GAMES.length;i++) if(GAMES[i].id===id) return GAMES[i]; return GAMES[0]; }
+
+function render(){
+  var v = document.getElementById("view");
+  var n = document.getElementById("note");
+  var navs = document.querySelectorAll(".navlink[data-nav]");
+  for(var i=0;i<navs.length;i++) navs[i].classList.remove("on");
+  document.querySelector('.navlink[data-nav="'+S.nav+'"]')?.classList.add("on");
+  if(S.nav==="lobby"){ v.innerHTML=renderLobby(); n.innerHTML="评审焦点：<b>大厅游戏卡</b> —— 每张 PvP 卡片带「⚔️对战」；点卡片试试。"; }
+  else if(S.nav==="game"){ v.innerHTML=renderGame(); n.innerHTML="评审焦点：<b>游戏单机页</b> —— 只加「⚔️去对战」按钮，其余保留。"; }
+  else if(S.nav==="pvp"){ v.innerHTML=renderPvp(); n.innerHTML="评审焦点：<b>该游戏对战页</b>（3 个 Tab）—— 原对战中心功能下沉到此处。"; }
+  else if(S.nav==="models"){ v.innerHTML=renderModels(); n.innerHTML="评审焦点：<b>模型托管</b> —— 新增「模型 vs 模型 挑战」区 + 挑战记录。"; }
+  else if(S.nav==="profile"){ v.innerHTML=renderProfile(); n.innerHTML="评审焦点：<b>资料页</b> —— 新增「我的对局」区块。"; }
+  else if(S.nav==="upload"){ v.innerHTML=renderPlaceholder("上传游戏"); n.innerHTML="占位页。"; }
+  else if(S.nav==="friends"){ v.innerHTML=renderPlaceholder("好友"); n.innerHTML="占位页。"; }
+  else if(S.nav==="docs"){ v.innerHTML=renderPlaceholder("API 文档"); n.innerHTML="占位页。"; }
+}
+
+document.addEventListener("click", function(e){
+  var t = e.target.closest("[data-nav],[data-act],[data-pvptab],[data-modelgame]");
+  if(!t) return;
+  var nav = t.getAttribute("data-nav");
+  if(nav){ S.nav=nav; S.playing=false; render(); return; }
+  var act = t.getAttribute("data-act");
+  if(act==="play"){ S.nav="game"; S.game=t.getAttribute("data-game"); render(); }
+  if(act==="pvp"){ S.nav="pvp"; S.game=t.getAttribute("data-game"); S.pvpTab="find"; render(); toast("进入 "+byId(S.game).name+" 对战页"); }
+  if(act==="join"){ toast("已加入房间，对局开始！→ 切到「对局」Tab"); S.pvpTab="play"; render(); }
+  if(act==="createRoom"){ toast("房间已创建，等待对手加入…"); S.pvpTab="play"; render(); }
+  if(act==="createInvite"){ toast("私有房间已创建：邀请码 M1RTS9"); S.pvpTab="play"; render(); }
+  if(act==="info"){ toast("环境 API：/api/"+t.getAttribute("data-game")+"/env/info"); }
+  if(act==="challenge"){ toast("挑战已发起 #18，后台运行中…"); }
+  var pt = t.getAttribute("data-pvptab");
+  if(pt){ S.pvpTab=pt; render(); }
+  var mg = t.getAttribute("data-modelgame");
+  if(mg){ S.modelGame=mg; render(); }
+});
+
+render();
+</script>
+</body>
+</html>

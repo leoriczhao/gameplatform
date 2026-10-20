@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gameplatform-sdk"
+version = "0.2.0"
+description = "Python SDK for Stream RL environments over official OpenEnv WebSockets"
+requires-python = ">=3.10"
+dependencies = ["numpy", "requests", "gymnasium>=1.1", "openenv==0.4.1"]
+
+[tool.setuptools]
+packages = ["gameplatform", "gameplatform.games"]

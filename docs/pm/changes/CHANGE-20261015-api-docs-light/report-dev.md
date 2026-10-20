@@ -1,0 +1,23 @@
+# CHANGE-20261015-api-docs-light report-dev
+
+- commits / 变更摘要: 无 git 仓库可提交。已改 `static-docs/api.html`：合入 mock DocsShell（亮色 token / 粘性侧栏 TOC / TocSearch / TrainingLoopHero / LightCode）；删除正文旧 `.toc`；新增 `#quickstart`；「接口分类总览」加 `id="overview"`；全部既有章节正文与 h2 id 保留。未改 `architecture.html` / OpenAPI / backend / web SPA。
+- 覆盖任务:
+  - [x] mock 壳层/IA 合入 `static-docs/api.html`，保留全部现有章节正文
+  - [x] 亮色 token（`#fafafa` / 白表面 / `#19191c` / `#71717a` / `#4f46e5` / LightCode）
+  - [x] 粘性侧栏 TOC 按 handoff 分组；删除旧 `.toc`
+  - [x] `#quickstart` + `#overview`
+  - [x] TOC 轻量过滤（非全文引擎）
+  - [x] 路径仍 `/api.html`；顶栏 大厅 / 模型托管 / API 文档 / Swagger；非 SPA
+  - [x] 交 `report-dev.md`
+- 触及: **static-docs only**（非 web / backend）
+- 开发自测: **通过**（静态核对 + 结构断言；对照 export 01–06）
+  - 01 overview：亮色壳 + `#quickstart` 训练闭环卡 + `#overview` 总览表可见
+  - 02 models：`#models` 节在正文；TOC 组「模型」含 models/custom/sdk；LightCode `pre/code` token 为 `#f4f4f5`/`#e4e4e7`/`#18181b`
+  - 03 openenv：`#openenv` / `#env` 正文与 TOC「环境 OpenEnv」分组在
+  - 04 mobile：`@media (max-width: 900px)` 侧栏堆叠样式已保留
+  - 05 search：`#toc-search` + hint「轻量过滤 TOC 与正文标题（非全文引擎）」；GROUPS 含「模型」相关条目可被「模型」过滤
+  - 06 auth：`#auth` 节 + 亮色 code；无暗色 `--bg:#0d1117`
+  - TOC 锚点：`#auth` / `#openenv` / `#models` 及全部原 h2 id 仍在
+  - 无 `/arena` 叙事；无 mock-banner；章节正文与 mock/原站字节级对齐（19 个 h2 块 MATCH）
+- OpenAPI / docs/api: **无变更**
+- 契约偏差: **无**

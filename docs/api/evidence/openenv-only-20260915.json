@@ -1,0 +1,139 @@
+{
+  "base_url": "http://127.0.0.1:60767",
+  "browser": "151.0.7922.34",
+  "account_registration": "passed",
+  "keyboard_gameplay": "passed",
+  "recorded_match": "/watch/match/1",
+  "replay_matches_original": true,
+  "replay_playback_and_seek": "passed",
+  "page_errors": [],
+  "versioned_replay_requests": [
+    {
+      "url": "ws://127.0.0.1:60767/api/openenv/snake/ws",
+      "direction": "sent",
+      "type": "reset",
+      "seed": 597202227,
+      "version": "1.1.0",
+      "include_state": true
+    },
+    {
+      "url": "ws://127.0.0.1:60767/api/openenv/snake/ws",
+      "direction": "received",
+      "type": "observation"
+    },
+    {
+      "url": "ws://127.0.0.1:60767/api/openenv/snake/ws",
+      "direction": "sent",
+      "type": "state"
+    },
+    {
+      "url": "ws://127.0.0.1:60767/api/openenv/snake/ws",
+      "direction": "received",
+      "type": "state"
+    },
+    {
+      "url": "ws://127.0.0.1:60767/api/openenv/snake/ws",
+      "direction": "sent",
+      "type": "step"
+    },
+    {
+      "url": "ws://127.0.0.1:60767/api/openenv/snake/ws",
+      "direction": "received",
+      "type": "observation"
+    },
+    {
+      "url": "ws://127.0.0.1:60767/api/openenv/snake/ws",
+      "direction": "sent",
+      "type": "step"
+    },
+    {
+      "url": "ws://127.0.0.1:60767/api/openenv/snake/ws",
+      "direction": "received",
+      "type": "observation"
+    },
+    {
+      "url": "ws://127.0.0.1:60767/api/openenv/snake/ws",
+      "direction": "sent",
+      "type": "step"
+    },
+    {
+      "url": "ws://127.0.0.1:60767/api/openenv/snake/ws",
+      "direction": "received",
+      "type": "observation"
+    },
+    {
+      "url": "ws://127.0.0.1:60767/api/openenv/snake/ws",
+      "direction": "sent",
+      "type": "step"
+    },
+    {
+      "url": "ws://127.0.0.1:60767/api/openenv/snake/ws",
+      "direction": "received",
+      "type": "observation"
+    },
+    {
+      "url": "ws://127.0.0.1:60767/api/openenv/snake/ws",
+      "direction": "sent",
+      "type": "step"
+    },
+    {
+      "url": "ws://127.0.0.1:60767/api/openenv/snake/ws",
+      "direction": "received",
+      "type": "observation"
+    },
+    {
+      "url": "ws://127.0.0.1:60767/api/openenv/snake/ws",
+      "direction": "sent",
+      "type": "step"
+    },
+    {
+      "url": "ws://127.0.0.1:60767/api/openenv/snake/ws",
+      "direction": "received",
+      "type": "observation"
+    },
+    {
+      "url": "ws://127.0.0.1:60767/api/openenv/snake/ws",
+      "direction": "sent",
+      "type": "step"
+    },
+    {
+      "url": "ws://127.0.0.1:60767/api/openenv/snake/ws",
+      "direction": "received",
+      "type": "observation"
+    },
+    {
+      "url": "ws://127.0.0.1:60767/api/openenv/snake/ws",
+      "direction": "sent",
+      "type": "step"
+    },
+    {
+      "url": "ws://127.0.0.1:60767/api/openenv/snake/ws",
+      "direction": "received",
+      "type": "observation"
+    },
+    {
+      "url": "ws://127.0.0.1:60767/api/openenv/snake/ws",
+      "direction": "sent",
+      "type": "step"
+    },
+    {
+      "url": "ws://127.0.0.1:60767/api/openenv/snake/ws",
+      "direction": "received",
+      "type": "observation"
+    },
+    {
+      "url": "ws://127.0.0.1:60767/api/openenv/snake/ws",
+      "direction": "sent",
+      "type": "step"
+    },
+    {
+      "url": "ws://127.0.0.1:60767/api/openenv/snake/ws",
+      "direction": "received",
+      "type": "observation"
+    }
+  ],
+  "native_environment_requests": [],
+  "temporary_server": true,
+  "server_stopped": true,
+  "protocol": "OpenEnv 0.4.1 WebSocket"
+}

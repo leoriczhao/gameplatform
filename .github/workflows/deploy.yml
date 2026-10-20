@@ -1,0 +1,83 @@
+# 部署指定版本到生产服务器。由 Release 自动调用；也可在 Actions 页手动运行，
+# 填一个已发布的旧标签即可回滚（镜像已在 GHCR，不重新构建）。
+#
+# 需要在仓库 Settings → Environments → production 中配置：
+#   secrets: DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY, DEPLOY_KNOWN_HOSTS
+#   vars:    DEPLOY_PATH（服务器上的项目目录）、PUBLIC_URL（公网地址，用于部署后检查）
+#   建议开启 Required reviewers，部署前需人工批准。
+name: Deploy
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "要部署的发布标签（如 v1.2.0），回滚时填旧标签"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy ${{ inputs.version }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment:
+      name: production
+      url: ${{ vars.PUBLIC_URL }}
+    env:
+      VERSION: ${{ inputs.version }}
+      DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+      TARGET: ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Configure SSH
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_deploy
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_deploy ~/.ssh/known_hosts
+          printf 'Host *\n  IdentityFile ~/.ssh/id_deploy\n  IdentitiesOnly yes\n' > ~/.ssh/config
+
+      # 只同步部署脚本和 compose；deploy/.env 与 .tunnel-token 留在服务器上不动。
+      - name: Sync deploy scripts
+        run: |
+          scp deploy/docker-compose.yml deploy/backup.sh deploy/release.sh \
+            "$TARGET:$DEPLOY_PATH/deploy/"
+
+      # 用本次 job 的短期 GITHUB_TOKEN 登录 GHCR 拉镜像，结束即登出。
+      - name: Pull image and switch web
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          image="ghcr.io/$owner/gameplatform:$VERSION"
+          printf '%s' "$GHCR_TOKEN" | ssh "$TARGET" \
+            "docker login ghcr.io -u '$GITHUB_ACTOR' --password-stdin >/dev/null \
+             && cd '$DEPLOY_PATH' && sh deploy/release.sh '$image' '$VERSION'; \
+             rc=\$?; docker logout ghcr.io >/dev/null; exit \$rc"
+
+      - name: Check public endpoint
+        if: ${{ vars.PUBLIC_URL != '' }}
+        run: |
+          for i in $(seq 1 10); do
+            if curl -fsS "${{ vars.PUBLIC_URL }}/api/ready"; then echo; exit 0; fi
+            sleep 6
+          done
+          echo "public /api/ready failed" >&2
+          exit 1

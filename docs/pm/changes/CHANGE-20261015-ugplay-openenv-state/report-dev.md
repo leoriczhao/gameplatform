@@ -1,0 +1,28 @@
+# CHANGE-20261015-ugplay-openenv-state report-dev
+
+- commits / 变更摘要: 无 git 仓库可提交。已修进局 `inf.meta` 崩溃：FE 对 `env.state()` 缺 `environment` 做空安全 + 目录 meta 兜底；BE 将 `state` 改为返回 `PlatformState`，并在 `make_openenv_app` 重挂 `GET /state`（`response_model=PlatformState`），避免官方 `create_fastapi_app` 用 `response_model=State` 剥掉 `game_state`/`environment`。`replay.js` 同步空安全（缺 environment 时明确报错，不抛 `meta` TypeError）。未部署。
+- 覆盖任务:
+  - [x] FE：`UgPlay.jsx` / `UgPvp.jsx` 对 `env.state()` 空安全；目录 `g.meta` 回退；失败走 Alert/toast
+  - [x] FE：同类 `inf.meta`（`replay.js`）空安全
+  - [x] BE/契约：核对 OpenEnv `state` 应含 `environment`（docs/api/openenv.md + tests）；恢复服务端序列化
+  - [x] 自测：FE 瘦 state 路径 + BE FastAPI 剥字段复现/修复 + `web/tests` openenv/replay
+  - [x] `report-dev.md`
+- 触及: both（web + backend）
+- 开发自测: 通过
+  - 线上复现：`GET https://games.cree1p.com/api/openenv/microrts/state` → `{"episode_id":null,"step_count":0}`（无 `environment`）
+  - 根因：`create_fastapi_app` 注册 `/state` 为 `response_model=State`；若返回 `PlatformState`，FastAPI 只保留 `episode_id`/`step_count`。WS `model_dump()` 对声明字段正常，但线上 HTTP/历史路径已表现为瘦 payload，FE 无兜底即炸。
+  - FE 自测：瘦 `{episode_id,step_count}` → 用 catalog meta，不抛；完整 environment → 优先 env.meta
+  - BE 自测：`response_model=State`+`PlatformState` 复现瘦响应；`response_model=PlatformState` 保留 `environment`
+  - `cd web && node --test tests/openenv.test.js tests/replay.test.js` → 36 pass / 0 fail
+- OpenAPI / docs/api: 无破坏性变更。契约仍为 docs/api/openenv.md：`state.data` 含 `episode_id`/`step_count`/`game_state`/`environment`。`/schema.state` 已是 `PlatformState.model_json_schema()`；本次让 HTTP `/state` 与之对齐。
+- 契约偏差: 无（恢复文档与测试已要求的 `environment`；FE 额外容忍瘦 state，避免再白屏）
+- 决策记录:
+  - **`environment` 应在 state 中**（非故意精简）。训练/网页/回放都依赖 `state.environment` 取 version/meta/schemas。
+  - BE：返回 `PlatformState` + 重挂 `/state`（`response_model=PlatformState`），不用「State + extras」赌 FastAPI 不剥字段。
+  - FE：仍做空安全 + 目录回退，防御契约漂移；失败走现有 Alert/toast。
+- 变更文件:
+  - `backend/openenv_native.py`
+  - `web/src/pages/UgPlay.jsx`
+  - `web/src/pages/UgPvp.jsx`
+  - `web/src/replay.js`
+  - `docs/pm/changes/CHANGE-20261015-ugplay-openenv-state/report-dev.md`

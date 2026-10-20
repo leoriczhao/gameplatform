@@ -1,0 +1,38 @@
+slug: snake
+title: 贪吃蛇
+description: 20×20 网格贪吃蛇：吃食物 +1 分，撞墙/撞身死亡。相对动作（0=左转 1=直行 2=右转）
+version: 1.1.0
+board:
+  schema: 2
+  width: 20
+  height: 20
+  cell: { size: 30, gap: 1, radius: 4 }
+  background: { kind: checker, colors: ["#f8fafc", "#f1f5f9"] }
+  palette:
+    empty: {}
+    body:  { glyph: "●", color: "#bbf7d0", glyph_color: "#16a34a", scale: 0.6, shadow: true }
+    head:  { sprite: head, orient: { field: direction, angles: [270, 90, 180, 0] } }
+    food:  { sprite: food, anim: { effect: pulse, period: 1100, amount: 0.16 } }
+  hud:
+    - { kind: stat, label: 分数, path: score, color: "#059669" }
+    - { kind: badge, label: TICK, path: tick }
+  events:
+    - { name: eat,   effect: { kind: flash, color: "#34d399", ms: 220 } }
+    - { name: death, effect: { kind: shake, ms: 380, amount: 5 } }
+assets:
+  head: { file: "assets/head.png", w: 24, h: 24 }
+  food: { file: "assets/food.png", w: 24, h: 24 }
+contract:
+  in_shape: [1, 1334]
+  out_shape: [1, 3]
+  protocol: simple
+  obs_mode: rotwin
+ai_strategies: [dqn]
+controls:
+  mode: relative-turn
+  direction_field: direction
+  keys:
+    ArrowUp: [0, "上"]
+    ArrowDown: [1, "下"]
+    ArrowLeft: [2, "左"]
+    ArrowRight: [3, "右"]

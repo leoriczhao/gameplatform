@@ -1,0 +1,22 @@
+id: CHANGE-20261015-qa-smoke-lib
+version: 1
+owner: stream-pm
+status: done
+gate: none
+user_ack: null
+assignee_next: null
+stage: done
+stage_event: qa.ready
+depends_on: []
+artifacts:
+  - docs/pm/qa/smoke-cases.md
+  - docs/pm/qa/fixtures.md
+  - docs/pm/changes/CHANGE-20261015-qa-smoke-lib/specify.md
+  - docs/pm/changes/CHANGE-20261015-qa-smoke-lib/plan.md
+  - docs/pm/changes/CHANGE-20261015-qa-smoke-lib/report-qa.md
+done_when:
+  - report-qa.md（H 批结果 + 夹具说明）
+  - smoke-cases.md 状态回填
+notes: |
+  H01–H08 全绿（H02/H05 2026-10-15 补跑）。文档 CHANGE 收口。
+  FIX-QA-01 qa_smoke_1015；FIX-QA-02 现网 #4 qa-smoke-snake-1015。

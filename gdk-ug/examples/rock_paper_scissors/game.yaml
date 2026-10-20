@@ -1,0 +1,20 @@
+slug: rock-paper-scissors
+title: 石头剪刀布
+description: 经典三选一：PvE 五局三胜打内置随机，PvP 先胜 3 局者赢
+version: 1.0.0
+board:
+  width: 3
+  height: 1
+  palette:
+    "0": { glyph: "0" }
+    "1": { glyph: "1" }
+    "2": { glyph: "2" }
+    "3": { glyph: "3" }
+    p0:   { glyph: "🔵" }
+    p1:   { glyph: "🔴" }
+    draw: { glyph: "🤝" }
+    empty: { glyph: "·" }
+pvp:
+  enabled: true
+  action: choice
+  choices: ["石头", "剪刀", "布"]

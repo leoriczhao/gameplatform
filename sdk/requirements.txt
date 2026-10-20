@@ -1,0 +1,5 @@
+numpy
+requests
+gymnasium>=1.1
+openenv==0.4.1
+# torch / stable-baselines3 are only needed to run training scripts

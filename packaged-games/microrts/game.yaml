@@ -1,0 +1,45 @@
+slug: microrts
+title: 微RTS · MicroRTS
+description: 16×16 微型 RTS：采矿 → 建造兵营 → 爆兵 → 摧毁敌方全部单位。复合动作（每 tick 每单位一条指令）
+version: 1.1.0
+board:
+  schema: 2
+  width: 16
+  height: 16
+  cell: { size: 30, gap: 0, radius: 2 }
+  background: { kind: checker, colors: ["#f4f4f5", "#ebebee"] }
+  palette:
+    empty: {}
+    wall:  { color: "#d4d4d8" }
+    mine:  { glyph: "◆", color: "#fef08a", glyph_color: "#a16207", scale: 0.7 }
+  hud:
+    - { kind: stat, label: 金矿 P0, path: bank.0, color: "#2563eb" }
+    - { kind: stat, label: 金矿 P1, path: bank.1, color: "#dc2626" }
+    - { kind: badge, label: TICK, path: tick }
+  events:
+    - { name: attack, effect: { kind: flash, color: "#fca5a5", ms: 160 } }
+    - { name: death,  effect: { kind: shake, ms: 220, amount: 3 } }
+units:
+  base:     { glyph: "🏰", owner_colors: ["#2563eb", "#dc2626"],
+              hp: { field: hp, max_field: hp_max, color: "#22c55e" }, z: 1 }
+  barracks: { glyph: "🏭", owner_colors: ["#2563eb", "#dc2626"],
+              hp: { field: hp, max_field: hp_max, color: "#22c55e" }, z: 1 }
+  worker:   { glyph: "👷", owner_colors: ["#2563eb", "#dc2626"],
+              hp: { field: hp, max_field: hp_max, color: "#22c55e" }, z: 2 }
+  light:    { glyph: "🐴", owner_colors: ["#2563eb", "#dc2626"],
+              hp: { field: hp, max_field: hp_max, color: "#22c55e" }, z: 2 }
+  heavy:    { glyph: "🛡️", owner_colors: ["#2563eb", "#dc2626"],
+              hp: { field: hp, max_field: hp_max, color: "#22c55e" }, z: 2 }
+  ranged:   { glyph: "🏹", owner_colors: ["#2563eb", "#dc2626"],
+              hp: { field: hp, max_field: hp_max, color: "#22c55e" }, z: 2 }
+contract:
+  in_shape: [1, 1546]
+  out_shape: [1, 140]
+  protocol: composite
+pvp:
+  enabled: true
+  action: unit
+  options: { opponent: external }
+opponents: [worker_rush, light_rush, ranged_rush]
+default_opponent: worker_rush
+ai_strategies: [worker_rush, light_rush, ranged_rush]

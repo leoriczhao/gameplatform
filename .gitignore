@@ -1,0 +1,13 @@
+.venv/
+.pytest_cache/
+__pycache__/
+*.pyc
+web/node_modules/
+web/dist/
+.data/
+*.db
+
+# 部署密钥（只放服务器，永不入库）
+deploy/.env
+deploy/.tunnel-token
+.tunnel-token

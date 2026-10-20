@@ -1,0 +1,37 @@
+id: CHANGE-20261015-api-docs-light
+version: 1
+owner: stream-pm
+status: done
+gate: shipped
+user_ack:
+  by: leoric
+  at: "2026-10-15T15:49:06+08:00"
+  channel: chat
+  quote: "ship-ack"
+ops:
+  by: kr-ops
+  at: "2026-10-15T15:55:00+08:00"
+  image: gameplatform:api-docs-light-20261015-1555
+  digest: sha256:f1ea76b825b5629006e8e7edc8de7ff040a82cda21f5628fab323b4e534e3b7c
+  current_release: api-docs-light-20261015-1555
+  target: games.cree1p.com
+
+assignee_next: null
+stage: done
+stage_event: ship.done
+depends_on: []
+artifacts:
+  - docs/pm/changes/CHANGE-20261015-api-docs-light/specify.md
+  - docs/pm/changes/CHANGE-20261015-api-docs-light/ui/ui-handoff.md
+  - docs/pm/changes/CHANGE-20261015-api-docs-light/plan.md
+  - docs/pm/changes/CHANGE-20261015-api-docs-light/report-dev.md
+  - docs/pm/changes/CHANGE-20261015-api-docs-light/report-qa.md
+  - docs/pm/changes/CHANGE-20261015-api-docs-light/ship.md
+  - static-docs/api.html
+done_when:
+  - report-dev.md + report-qa.md
+  - ship + user_ack human-ship
+  - ops.done games.cree1p.com
+notes: |
+  QA 通过。leoric human-ship 确认后 KR 已发 games.cree1p.com（仅 static-docs/api.html）。
+  镜像 api-docs-light-20261015-1555 / f1ea76b825b5。回滚用 rl-lab-ux-20261015-1502。

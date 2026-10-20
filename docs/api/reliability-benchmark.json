@@ -1,0 +1,56 @@
+[
+  {
+    "game": "microrts",
+    "batch_size": 16,
+    "scalar_ipc_calls": 64,
+    "batch_ipc_calls": 1,
+    "scalar_ms": 17.126,
+    "batch_ms": 4.91,
+    "speedup": 3.49
+  },
+  {
+    "game": "microrts",
+    "batch_size": 256,
+    "scalar_ipc_calls": 1024,
+    "batch_ipc_calls": 1,
+    "scalar_ms": 297.274,
+    "batch_ms": 87.665,
+    "speedup": 3.39
+  },
+  {
+    "game": "snake",
+    "batch_size": 16,
+    "scalar_ipc_calls": 64,
+    "batch_ipc_calls": 1,
+    "scalar_ms": 14.339,
+    "batch_ms": 3.844,
+    "speedup": 3.73
+  },
+  {
+    "game": "snake",
+    "batch_size": 256,
+    "scalar_ipc_calls": 1024,
+    "batch_ipc_calls": 1,
+    "scalar_ms": 248.939,
+    "batch_ms": 68.232,
+    "speedup": 3.65
+  },
+  {
+    "game": "tetris",
+    "batch_size": 16,
+    "scalar_ipc_calls": 64,
+    "batch_ipc_calls": 1,
+    "scalar_ms": 13.133,
+    "batch_ms": 2.632,
+    "speedup": 4.99
+  },
+  {
+    "game": "tetris",
+    "batch_size": 256,
+    "scalar_ipc_calls": 1024,
+    "batch_ipc_calls": 1,
+    "scalar_ms": 222.035,
+    "batch_ms": 45.417,
+    "speedup": 4.89
+  }
+]

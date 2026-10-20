@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stream 多游戏 RL 平台 · 架构总览</title>
+<style>
+  :root{
+    --bg:#0f1420; --panel:#171e2e; --panel2:#1d2638; --line:#2a3550;
+    --text:#dbe4f5; --dim:#90a0c0; --accent:#6ea8ff; --accent2:#8be08b;
+    --warn:#ffce7a; --danger:#ff7a7a; --purple:#b79bff;
+    --mono:ui-monospace,SFMono-Regular,Consolas,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font:15px/1.65 system-ui,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif}
+  .wrap{max-width:1180px;margin:0 auto;padding:0 20px 80px}
+  header.hero{padding:34px 0 8px;border-bottom:1px solid var(--line);margin-bottom:20px}
+  .kicker{color:var(--accent);font-weight:700;letter-spacing:.06em;font-size:13px}
+  h1{font-size:30px;margin:6px 0 6px;letter-spacing:.01em}
+  .sub{color:var(--dim);max-width:860px}
+  nav.tabs{position:sticky;top:0;background:rgba(15,20,32,.96);backdrop-filter:blur(6px);
+    border-bottom:1px solid var(--line);display:flex;flex-wrap:wrap;gap:4px;padding:8px 0;z-index:20;margin-bottom:22px}
+  nav.tabs button{background:transparent;border:1px solid transparent;color:var(--dim);
+    padding:6px 13px;border-radius:999px;cursor:pointer;font-size:13.5px;white-space:nowrap}
+  nav.tabs button:hover{color:var(--text);background:var(--panel2)}
+  nav.tabs button.on{background:var(--panel2);color:var(--accent);border-color:var(--line)}
+  section.page{display:none}
+  section.page.on{display:block;animation:fade .25s ease}
+  @keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1}}
+  h2{font-size:22px;margin:6px 0 14px}
+  h3{font-size:16px;margin:18px 0 8px;color:var(--accent)}
+  p.lead{color:var(--dim);max-width:900px;margin-bottom:14px}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;margin:16px 0}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px}
+  .card h4{font-size:15px;margin-bottom:6px}
+  .card .tag{font-size:12px;color:var(--accent);font-weight:600}
+  .card p{color:var(--dim);font-size:13.5px}
+  table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13.5px}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--accent);font-weight:600;background:var(--panel2);font-size:12.5px;letter-spacing:.03em}
+  td code, p code, li code{background:var(--panel2);border:1px solid var(--line);border-radius:5px;
+    padding:1px 6px;font-family:var(--mono);font-size:12.5px;color:var(--accent2)}
+  .mono{font-family:var(--mono)}
+  .pill{display:inline-block;font-size:11.5px;padding:1px 8px;border-radius:999px;border:1px solid var(--line);
+    color:var(--dim);background:var(--panel2);margin-right:6px;white-space:nowrap}
+  .pill.acc{color:var(--accent);border-color:var(--accent)}
+  .pill.grn{color:var(--accent2);border-color:var(--accent2)}
+  .pill.warn{color:var(--warn);border-color:var(--warn)}
+  .diagram{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px;margin:16px 0;overflow-x:auto}
+  .diagram svg{display:block;min-width:720px;width:100%;height:auto}
+  .diagram svg text{font-family:system-ui,"PingFang SC","Microsoft YaHei",sans-serif}
+  .note{border-left:3px solid var(--accent);background:var(--panel);border-radius:0 10px 10px 0;
+    padding:12px 16px;margin:14px 0;color:var(--dim);font-size:13.5px}
+  .note b{color:var(--text)}
+  ul,ol{margin:8px 0 8px 22px}
+  li{margin:4px 0}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:820px){.grid2{grid-template-columns:1fr}}
+  footer{border-top:1px solid var(--line);margin-top:36px;padding-top:14px;color:var(--dim);font-size:12.5px;line-height:1.7}
+  footer code{font-family:var(--mono);font-size:12px}
+  .badge{font-size:12px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:2px 9px;color:var(--dim)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <div class="kicker">ARCHITECTURE · HTML ARTIFACT</div>
+  <h1>Stream —— 多游戏 RL 平台架构总览</h1>
+  <p class="sub">「游戏 + 训练 + 模型对战」三位一体：唯一官方 OpenEnv 环境入口 · 一引擎原则 · UGC 游戏包 · 平台业务 API。
+  目标域名 <span class="mono">games.cree1p.com</span>。</p>
+  <div style="margin-top:10px">
+    <span class="pill acc">OpenEnv 0.4.1 · WS 一连接一实例</span>
+    <span class="pill grn">SDK Gymnasium 包装</span>
+    <span class="pill grn">EnvAdapter + 沙箱游戏包</span>
+    <span class="pill warn">本次仅更新文档，非部署/验收结果</span>
+    <span class="pill">React 18 + FastAPI + SQLite</span>
+  </div>
+  <div class="note"><b>当前环境契约</b>：以 <a href="api/openenv.md">docs/api/openenv.md</a> 为准，旧环境 API 已删除，无兼容。账号、play、模型、排行榜和回放记录等业务 API 不变；下方决策日志保留历史，不作为现行接口。代码计数是旧快照，本次未重新统计或运行测试。</div>
+</header>
+
+<nav class="tabs" id="tabs">
+  <button data-p="overview" class="on">总览</button>
+  <button data-p="engine">一引擎多入口</button>
+  <button data-p="api">API 面</button>
+  <button data-p="contract">游戏包契约</button>
+  <button data-p="training">训练闭环</button>
+  <button data-p="match">对局闭环</button>
+  <button data-p="ugc">UGC 管线</button>
+  <button data-p="openenv">OpenEnv 环境入口</button>
+  <button data-p="map">代码地图</button>
+  <button data-p="decisions">决策日志</button>
+</nav>
+
+<!-- ═══════════════ 总览 ═══════════════ -->
+<section class="page on" id="p-overview">
+  <h2>系统分层</h2>
+  <p class="lead">平台围绕三个核心能力：<b>玩游戏</b>（网页/会话制对局）、<b>训模型</b>（官方 OpenEnv 会话，训练算法在调用方运行）、<b>打对抗</b>（上传 ONNX 模型自动参战）。当前游戏运行层仍是现有 <span class="mono">EnvAdapter</span>：网页、训练、模型对战共用规则。确定性重放限定于固定版本、相同 seed/options 与动作输入，不表示任意复杂外部游戏引擎已支持。</p>
+
+  <div class="diagram">
+  <svg viewBox="0 0 1000 560" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0 0 L10 5 L0 10 z" fill="#90a0c0"/>
+      </marker>
+    </defs>
+    <!-- consumers -->
+    <text x="500" y="22" fill="#90a0c0" font-size="13" text-anchor="middle" font-weight="600">消 费 者</text>
+    <rect x="60" y="34" width="200" height="52" rx="10" fill="#1d2638" stroke="#2a3550"/>
+    <text x="160" y="56" fill="#dbe4f5" font-size="13" text-anchor="middle">👤 玩家（浏览器 React）</text>
+    <text x="160" y="74" fill="#90a0c0" font-size="11" text-anchor="middle">大厅 / 对战 / 观战 / 回放</text>
+    <rect x="285" y="34" width="200" height="52" rx="10" fill="#1d2638" stroke="#2a3550"/>
+    <text x="385" y="56" fill="#dbe4f5" font-size="13" text-anchor="middle">🤖 Bot 开发者</text>
+    <text x="385" y="74" fill="#90a0c0" font-size="11" text-anchor="middle">全量 API / SDK 直接连平台</text>
+    <rect x="510" y="34" width="200" height="52" rx="10" fill="#1d2638" stroke="#2a3550"/>
+    <text x="610" y="56" fill="#dbe4f5" font-size="13" text-anchor="middle">🧠 RL 训练算法</text>
+    <text x="610" y="74" fill="#90a0c0" font-size="11" text-anchor="middle">SB3 / CleanRL / 自研 DQN（本地）</text>
+    <rect x="735" y="34" width="200" height="52" rx="10" fill="#1d2638" stroke="#2a3550"/>
+    <text x="835" y="56" fill="#dbe4f5" font-size="13" text-anchor="middle">🌐 OpenEnv Client</text>
+    <text x="835" y="74" fill="#90a0c0" font-size="11" text-anchor="middle">WS 环境会话 / 官方客户端</text>
+    <!-- API layer -->
+    <text x="500" y="126" fill="#90a0c0" font-size="13" text-anchor="middle" font-weight="600">API 层 · FastAPI（/api/…，CORS 全开）</text>
+    <rect x="40" y="138" width="300" height="120" rx="12" fill="#1d2638" stroke="#6ea8ff" stroke-width="1.2"/>
+    <text x="190" y="160" fill="#6ea8ff" font-size="13" text-anchor="middle" font-weight="600">游玩 / 对局面</text>
+    <text x="190" y="180" fill="#dbe4f5" font-size="11.5" text-anchor="middle">/api/v1/{game}/play/sessions</text>
+    <text x="190" y="197" fill="#dbe4f5" font-size="11.5" text-anchor="middle">rooms · matchmaking · watch · replay</text>
+    <text x="190" y="222" fill="#90a0c0" font-size="11" text-anchor="middle">会话制 · 服务端持有 state（D1）</text>
+    <text x="190" y="240" fill="#90a0c0" font-size="11" text-anchor="middle">PvE / PvP / 断线重连 / 观战</text>
+    <rect x="365" y="138" width="300" height="120" rx="12" fill="#1d2638" stroke="#8be08b" stroke-width="1.2"/>
+    <text x="515" y="160" fill="#8be08b" font-size="13" text-anchor="middle" font-weight="600">环境交互（官方 OpenEnv）</text>
+    <text x="515" y="180" fill="#dbe4f5" font-size="11.5" text-anchor="middle">/api/openenv/{game}/ws</text>
+    <text x="515" y="197" fill="#dbe4f5" font-size="11.5" text-anchor="middle">reset · step · state（同一连接）</text>
+    <text x="515" y="222" fill="#90a0c0" font-size="11" text-anchor="middle">每游戏共享 64 个实例 · 非吞吐承诺</text>
+    <text x="515" y="240" fill="#90a0c0" font-size="11" text-anchor="middle">版本/seed/options 固定后重放</text>
+    <rect x="690" y="138" width="270" height="120" rx="12" fill="#1d2638" stroke="#b79bff" stroke-width="1.2"/>
+    <text x="825" y="160" fill="#b79bff" font-size="13" text-anchor="middle" font-weight="600">环境发现与描述</text>
+    <text x="825" y="180" fill="#dbe4f5" font-size="11.5" text-anchor="middle">/api/openenv/{game}/schema</text>
+    <text x="825" y="197" fill="#dbe4f5" font-size="11.5" text-anchor="middle">GET /api/games → openenv_url</text>
+    <text x="825" y="222" fill="#90a0c0" font-size="11" text-anchor="middle">会话 environment → 版本/渲染配置</text>
+    <text x="825" y="240" fill="#90a0c0" font-size="11" text-anchor="middle">schema_url → 当前 wire schema</text>
+    <!-- platform services -->
+    <rect x="40" y="280" width="480" height="74" rx="10" fill="#1d2638" stroke="#2a3550"/>
+    <text x="280" y="302" fill="#dbe4f5" font-size="12" text-anchor="middle">平台服务 /api/v1/*：auth · models(ONNX) · matches · social · growth · admin · ugc</text>
+    <text x="280" y="322" fill="#90a0c0" font-size="11" text-anchor="middle">ELO 匹配 · 房间 · 排行榜 · 通知 · 模型托管 · UGC 审核</text>
+    <text x="280" y="342" fill="#90a0c0" font-size="11" text-anchor="middle">会话/房间/队列内存态（D12）· 其余 SQLite</text>
+    <rect x="545" y="280" width="415" height="74" rx="10" fill="#1d2638" stroke="#2a3550"/>
+    <text x="750" y="302" fill="#dbe4f5" font-size="12" text-anchor="middle">模型对战 worker（onnxruntime，无 torch）</text>
+    <text x="750" y="322" fill="#90a0c0" font-size="11" text-anchor="middle">按每游戏 model I/O 契约推进同一 step_state</text>
+    <text x="750" y="342" fill="#90a0c0" font-size="11" text-anchor="middle">模型 vs 模型 / 模型 vs 内置 AI</text>
+    <!-- arrows to game layer -->
+    <path d="M190 258 L190 382" stroke="#90a0c0" stroke-width="1.5" marker-end="url(#arr)" fill="none"/>
+    <path d="M515 258 L515 382" stroke="#90a0c0" stroke-width="1.5" marker-end="url(#arr)" fill="none"/>
+    <path d="M825 258 L825 382" stroke="#90a0c0" stroke-width="1.5" marker-end="url(#arr)" fill="none"/>
+    <!-- game layer -->
+    <text x="500" y="398" fill="#90a0c0" font-size="13" text-anchor="middle" font-weight="600">游戏层 · 注册表 + 沙箱（13 G3：平台零游戏名硬编码）</text>
+    <rect x="60" y="410" width="200" height="100" rx="12" fill="#1d2638" stroke="#6ea8ff"/>
+    <text x="160" y="434" fill="#dbe4f5" font-size="13" text-anchor="middle">registry.GAMES</text>
+    <text x="160" y="454" fill="#90a0c0" font-size="11" text-anchor="middle">发布/下架/版本切换</text>
+    <text x="160" y="472" fill="#90a0c0" font-size="11" text-anchor="middle">动态进出注册表</text>
+    <text x="160" y="490" fill="#90a0c0" font-size="11" text-anchor="middle">reset 固定版本 · 下架仍不可用</text>
+    <rect x="290" y="410" width="230" height="100" rx="12" fill="#1d2638" stroke="#8be08b"/>
+    <text x="405" y="434" fill="#dbe4f5" font-size="13" text-anchor="middle">ProxyAdapter（EnvAdapter 面）</text>
+    <text x="405" y="454" fill="#90a0c0" font-size="11" text-anchor="middle">上门所有路由共用这一张脸</text>
+    <text x="405" y="472" fill="#90a0c0" font-size="11" text-anchor="middle">请求转发给沙箱 worker</text>
+    <text x="405" y="490" fill="#90a0c0" font-size="11" text-anchor="middle">rlimit · 超时 · 熔断</text>
+    <rect x="555" y="410" width="200" height="100" rx="12" fill="#1d2638" stroke="#b79bff"/>
+    <text x="655" y="434" fill="#dbe4f5" font-size="13" text-anchor="middle">沙箱 GameWorker</text>
+    <text x="655" y="454" fill="#90a0c0" font-size="11" text-anchor="middle">标准库白名单 + numpy（D25）</text>
+    <text x="655" y="472" fill="#90a0c0" font-size="11" text-anchor="middle">禁网络 / 禁写文件 / 禁子进程</text>
+    <text x="655" y="490" fill="#90a0c0" font-size="11" text-anchor="middle">隔离与预算见 api/ugc-isolation.md</text>
+    <rect x="790" y="410" width="170" height="100" rx="12" fill="#171e2e" stroke="#ffce7a" stroke-dasharray="5 4"/>
+    <text x="875" y="436" fill="#ffce7a" font-size="12.5" text-anchor="middle">游戏包 EnvAdapter</text>
+    <text x="875" y="456" fill="#90a0c0" font-size="11" text-anchor="middle">纯函数规则内核</text>
+    <text x="875" y="474" fill="#90a0c0" font-size="11" text-anchor="middle">种子包 + 用户上传</text>
+    <text x="875" y="492" fill="#90a0c0" font-size="11" text-anchor="middle">同一沙箱管线</text>
+    <!-- storage -->
+    <rect x="300" y="530" width="400" height="26" rx="8" fill="#171e2e" stroke="#2a3550"/>
+    <text x="500" y="547" fill="#90a0c0" font-size="11.5" text-anchor="middle">存储：SQLite（users/models/matches/ratings/scores/ugc_*）+ 内存态会话/房间/队列</text>
+  </svg>
+  </div>
+
+  <div class="cards">
+    <div class="card"><div class="tag">一引擎原则 · D3</div><h4>游戏动力学只有一份</h4>
+      <p>网页会话、OpenEnv 环境和模型对战 worker 调用同一个 <code>step_state</code>——不存在「训练一套、线上另一套」。</p></div>
+    <div class="card"><div class="tag">当前环境契约（取代旧 D2）</div><h4>一连接一实例</h4>
+      <p>WS 会话持有局面；SDK 向量槽各用独立连接，不再单 HTTP 批量推进。关闭连接销毁实例，重连后显式 reset，不能盲目重发 step。</p></div>
+    <div class="card"><div class="tag">D26 · 游戏解耦</div><h4>平台零游戏名硬编码</h4>
+      <p>官方种子游戏与用户上传走同一条沙箱管线（game.yaml + <code>__init__.py</code>），import 即注册。</p></div>
+    <div class="card"><div class="tag">D18/D25 · 沙箱</div><h4>受限子进程隔离</h4>
+      <p>纯函数 JSON 协议 + rlimit + AST 静态扫描 + 审核兜底；作者只能用标准库白名单 + numpy。</p></div>
+  </div>
+</section>
+
+<!-- ═══════════════ 一引擎多入口 ═══════════════ -->
+<section class="page" id="p-engine">
+  <h2>一引擎 · 业务与环境分离</h2>
+  <p class="lead">核心是游戏包的 <b>EnvAdapter 纯函数契约</b>。平台复用此契约提供对局会话、AI/排行榜业务、官方 OpenEnv 环境与模型对战 worker；训练只通过 OpenEnv 交互，不再有另一套环境协议。</p>
+
+  <div class="diagram">
+  <svg viewBox="0 0 1000 420" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0 0 L10 5 L0 10 z" fill="#90a0c0"/>
+      </marker>
+    </defs>
+    <rect x="355" y="140" width="290" height="140" rx="16" fill="#1d2638" stroke="#8be08b" stroke-width="1.6"/>
+    <text x="500" y="178" fill="#8be08b" font-size="15" text-anchor="middle" font-weight="700">EnvAdapter（游戏规则内核）</text>
+    <text x="500" y="202" fill="#dbe4f5" font-size="12" text-anchor="middle">info · new_state · step_state · obs</text>
+    <text x="500" y="222" fill="#dbe4f5" font-size="12" text-anchor="middle">validate_state · validate_action</text>
+    <text x="500" y="242" fill="#dbe4f5" font-size="12" text-anchor="middle">ai_action · opponent_action · sample_action</text>
+    <text x="500" y="266" fill="#90a0c0" font-size="11.5" text-anchor="middle">固定版本/输入可重放 · 沙箱内执行</text>
+    <!-- faces -->
+    <rect x="30" y="60" width="280" height="86" rx="12" fill="#171e2e" stroke="#6ea8ff"/>
+    <text x="170" y="86" fill="#6ea8ff" font-size="13.5" text-anchor="middle" font-weight="600">对局面 /play/*</text>
+    <text x="170" y="108" fill="#dbe4f5" font-size="11.5" text-anchor="middle">服务端持有 state · 会话制（D1）</text>
+    <text x="170" y="126" fill="#90a0c0" font-size="11" text-anchor="middle">PvE/PvP · 匹配 · 回放 · 观战 · 重连</text>
+    <rect x="30" y="260" width="280" height="86" rx="12" fill="#171e2e" stroke="#8be08b"/>
+    <text x="170" y="286" fill="#8be08b" font-size="13.5" text-anchor="middle" font-weight="600">AI / 排行榜业务</text>
+    <text x="170" y="308" fill="#dbe4f5" font-size="11.5" text-anchor="middle">/api/{game}/ai/action · /scores</text>
+    <text x="170" y="326" fill="#90a0c0" font-size="11" text-anchor="middle">动作建议 / 成绩记录，不是环境步进</text>
+    <rect x="690" y="60" width="280" height="86" rx="12" fill="#171e2e" stroke="#b79bff"/>
+    <text x="830" y="86" fill="#b79bff" font-size="13.5" text-anchor="middle" font-weight="600">唯一环境 /api/openenv/{game}</text>
+    <text x="830" y="108" fill="#dbe4f5" font-size="11.5" text-anchor="middle">官方 reset/step/state · WS 会话</text>
+    <text x="830" y="126" fill="#90a0c0" font-size="11" text-anchor="middle">一连接一实例 · UGC 发布后可用</text>
+    <rect x="690" y="260" width="280" height="86" rx="12" fill="#171e2e" stroke="#ffce7a"/>
+    <text x="830" y="286" fill="#ffce7a" font-size="13.5" text-anchor="middle" font-weight="600">模型对战 worker</text>
+    <text x="830" y="308" fill="#dbe4f5" font-size="11.5" text-anchor="middle">ONNX 托管 · onnxruntime 推理</text>
+    <text x="830" y="326" fill="#90a0c0" font-size="11" text-anchor="middle">模型 vs 模型 / vs 内置 AI · ELO</text>
+    <path d="M170 146 L430 200" stroke="#90a0c0" stroke-width="1.5" marker-end="url(#arr2)" fill="none"/>
+    <path d="M170 260 L430 232" stroke="#90a0c0" stroke-width="1.5" marker-end="url(#arr2)" fill="none"/>
+    <path d="M830 146 L570 200" stroke="#90a0c0" stroke-width="1.5" marker-end="url(#arr2)" fill="none"/>
+    <path d="M830 260 L570 232" stroke="#90a0c0" stroke-width="1.5" marker-end="url(#arr2)" fill="none"/>
+    <text x="500" y="392" fill="#90a0c0" font-size="12.5" text-anchor="middle">现有游戏包与沙箱引擎复用；环境协议统一不等于任意外部游戏可直接接入</text>
+  </svg>
+  </div>
+
+  <h3>适配器复用的边界</h3>
+  <ul>
+    <li>契约面向「游戏动力学」而非任何传输协议：不要求 HTTP、不要求 Gymnasium、不要求 OpenEnv 概念。</li>
+    <li>OpenEnv server 将 <code>reset/step/state</code> 映射到现有 <code>new_state/step_state</code> 与会话状态，描述由 <code>info()</code> 和版本元数据提供。</li>
+    <li>完整 state 是当前快照型适配器的能力；未来游戏的策略观测不必公开内部状态，外部引擎仍需适配与验证。</li>
+  </ul>
+</section>
+
+<!-- ═══════════════ API 面 ═══════════════ -->
+<section class="page" id="p-api">
+  <h2>API 全景</h2>
+  <p class="lead">环境交互只有官方 OpenEnv；游玩会话、AI/排行榜及 /api/v1 账号/模型/对战/社交/成长/运营继续作为平台业务接口。</p>
+
+  <h3>A. 游玩 / 对局面（有状态会话，Bearer JWT）</h3>
+  <table>
+    <tr><th>端点</th><th>说明</th></tr>
+    <tr><td><code>POST /api/v1/{game}/play/sessions</code></td><td>创建会话（PvE/PvP），服务端持有 state</td></tr>
+    <tr><td><code>GET /api/v1/{game}/play/sessions/{id}</code></td><td>轮询当前 state + 状态</td></tr>
+    <tr><td><code>POST /api/v1/{game}/play/sessions/{id}/actions</code></td><td>提交本方动作，推进 tick（支持重连/再来一局）</td></tr>
+    <tr><td><code>GET /api/v1/{game}/play/sessions/{id}/replay</code></td><td>对局回放（动作序列，schema_version=1）</td></tr>
+    <tr><td><code>/api/v1/rooms · /matchmaking · /watch</code></td><td>房间（公开/私有）、快速匹配（ELO band）、观战/回放分享</td></tr>
+  </table>
+
+  <h3>B. AI 咨询 / 排行榜业务</h3>
+  <table>
+    <tr><th>端点</th><th>说明</th></tr>
+    <tr><td><code>POST /api/{game}/ai/action</code> / <code>GET·POST /scores</code></td><td>内置 AI 演示 / 排行榜（仅声明 <code>ai_strategies</code> 才挂载）</td></tr>
+  </table>
+
+  <h3>C. 唯一环境入口（/api/openenv/{game}/…）</h3>
+  <table>
+    <tr><th>端点</th><th>说明</th></tr>
+    <tr><td><code>GET /schema · /metadata · /health</code></td><td>当前发布版本的 wire schema / 元数据 / 健康；历史渲染读会话 environment</td></tr>
+    <tr><td><code>POST /reset · /step · GET /state</code></td><td>官方 HTTP 临时实例：每请求新建，reset 不为下次 step 留状态，无 state/action 注入信封</td></tr>
+    <tr><td><code>GET /{env}/splits · POST /{env}/tasks · /num_tasks · /task · /task_range</code></td><td>task = seed 序列（共 10,000 个）</td></tr>
+    <tr><td><code>WS /ws</code></td><td>一连接一实例，<code>reset/step/state</code>；关闭连接释放环境，每游戏共享上限 64</td></tr>
+    <tr><td><code>GET /api/games</code></td><td>环境发现：<code>openenv_url</code> 与 <code>schema_url</code></td></tr>
+    <tr><td><code>GET /api/openenv/list_environments</code></td><td>所有已注册游戏 = 可用环境</td></tr>
+  </table>
+
+  <h3>D. 平台服务（/api/v1/*）</h3>
+  <table>
+    <tr><th>域</th><th>端点与职责</th></tr>
+    <tr><td><code>auth</code></td><td>注册/登录/JWT/游客 · 资料</td></tr>
+    <tr><td><code>models</code></td><td>ONNX 上传（契约校验）· 评估 · 模型列表/战绩</td></tr>
+    <tr><td><code>matches</code></td><td>PvP 落库 + ELO + 模型对战 worker + 回放端点</td></tr>
+    <tr><td><code>social · growth · stats</code></td><td>好友/聊天/通知（轮询落库）· XP/等级 · 总榜/周榜/ELO 走势</td></tr>
+    <tr><td><code>admin · ugc</code></td><td>公告/举报/管理后台 · 游戏包上传/审核/发布/下架</td></tr>
+  </table>
+</section>
+
+<!-- ═══════════════ 游戏包契约 ═══════════════ -->
+<section class="page" id="p-contract">
+  <h2>游戏包 v2 契约</h2>
+  <p class="lead">一个游戏 = 一个 <b>zip 包</b>（官方种子包 <code>packaged-games/*</code> 与用户上传走同一条沙箱管线）。结构：<code>game.yaml</code>（元数据 + PvP 能力声明）+ <code>__init__.py</code>（鸭子类型 EnvAdapter）+ 资源文件。本地自测用 <code>gdk-ug/test_runner.py</code>（与线上沙箱同一套加载与校验逻辑）。</p>
+
+  <h3>EnvAdapter 契约方法</h3>
+  <table>
+    <tr><th>方法</th><th>职责</th><th>被谁消费</th></tr>
+    <tr><td><code>info()</code></td><td>网格/动作表/obs_modes/rewards/schemas</td><td>OpenEnv environment 描述 · 当前 /schema</td></tr>
+    <tr><td><code>new_state(seed, options)</code></td><td>seed 确定性初始化</td><td>OpenEnv reset · play 会话初始化</td></tr>
+    <tr><td><code>step_state(state, action, rewards)</code></td><td>纯函数转移；reward/done 写在返回 state 上</td><td>OpenEnv · play · 模型对战</td></tr>
+    <tr><td><code>obs(state, mode)</code></td><td>服务端观测（tensor 嵌套 list）</td><td>OpenEnv 观测包装 · 模型输入</td></tr>
+    <tr><td><code>validate_state / validate_action</code></td><td>入参校验（失败抛 ValueError → 400/422/错误帧）</td><td>所有写入路径</td></tr>
+    <tr><td><code>ai_action / opponent_action / sample_action</code></td><td>内置 AI / PvE 对手 / 采样</td><td>/ai/action · play · 模型评估</td></tr>
+    <tr><td><code>score_bounds</code></td><td>排行榜合法分区间</td><td>/scores</td></tr>
+    <tr><td><code>model_inputs / model_decode</code></td><td>ONNX 模型 I/O 契约（simple / composite）</td><td>模型托管与对战 worker</td></tr>
+  </table>
+
+  <h3>三个官方种子游戏</h3>
+  <table>
+    <tr><th>游戏</th><th>规则</th><th>动作</th><th>观测</th><th>内置 AI</th></tr>
+    <tr><td><code>snake</code></td><td>贪吃蛇 20×20（从 snake.cree1p.com 迁入，逐位一致）</td><td>相对 0=左转 1=直行 2=右转</td><td>grid 3×22×22 · features/rotwin/reach（客户端）</td><td>DQN（rotwin R=10，numpy 推理）</td></tr>
+    <tr><td><code>tetris</code></td><td>俄罗斯方块 10×20 · 7-bag 确定性出块</td><td>0=左 1=右 2=旋转 3=硬降</td><td>grid 2×20×10</td><td>Dellacherie 启发式一子搜索</td></tr>
+    <tr><td><code>microrts</code></td><td>微RTS 16×16（MicroRTS 规则移植，双代理）</td><td><b>复合动作</b> <code>[[unit_id, cmd, dir?, type?], …]</code></td><td>grid 6×16×16</td><td>WorkerRush/LightRush/RangedRush 确定性脚本</td></tr>
+  </table>
+</section>
+
+<!-- ═══════════════ 训练闭环 ═══════════════ -->
+<section class="page" id="p-training">
+  <h2>训练闭环</h2>
+  <p class="lead">训练算法在<b>调用方本地</b>运行；服务器只做环境转移。SDK 用官方 OpenEnv 连接包装为标准 Gymnasium 接口；向量槽各有独立连接，不再单 HTTP 批量推进，不承诺旧吞吐。</p>
+
+  <div class="diagram">
+  <svg viewBox="0 0 1000 300" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <marker id="arr3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0 0 L10 5 L0 10 z" fill="#90a0c0"/>
+      </marker>
+    </defs>
+    <rect x="20" y="60" width="190" height="110" rx="12" fill="#1d2638" stroke="#6ea8ff"/>
+    <text x="115" y="86" fill="#dbe4f5" font-size="12.5" text-anchor="middle">DQN / SB3 / CleanRL</text>
+    <text x="115" y="106" fill="#90a0c0" font-size="11" text-anchor="middle">training/snake_dqn.py 等</text>
+    <text x="115" y="124" fill="#90a0c0" font-size="11" text-anchor="middle">torch · 本地算力</text>
+    <text x="115" y="148" fill="#ffce7a" font-size="11" text-anchor="middle">动作 → 观测/奖励</text>
+    <rect x="240" y="60" width="200" height="110" rx="12" fill="#1d2638" stroke="#8be08b"/>
+    <text x="340" y="86" fill="#dbe4f5" font-size="12.5" text-anchor="middle">gymnasium 包装</text>
+    <text x="340" y="106" fill="#90a0c0" font-size="11" text-anchor="middle">gym.register("platform-*-v0")</text>
+    <text x="340" y="124" fill="#90a0c0" font-size="11" text-anchor="middle">Env / VectorEnv · 5 元组</text>
+    <text x="340" y="148" fill="#90a0c0" font-size="11" text-anchor="middle">向量 SAME_STEP · 提供终止观测</text>
+    <rect x="470" y="60" width="220" height="110" rx="12" fill="#1d2638" stroke="#b79bff"/>
+    <text x="580" y="86" fill="#dbe4f5" font-size="12.5" text-anchor="middle">RemoteVecEnv（sdk/remote.py）</text>
+    <text x="580" y="106" fill="#90a0c0" font-size="11" text-anchor="middle">n 个并行 env</text>
+    <text x="580" y="124" fill="#90a0c0" font-size="11" text-anchor="middle">每槽独立 WS reset/step/state</text>
+    <text x="580" y="148" fill="#90a0c0" font-size="11" text-anchor="middle">管理 seed 推进 / 自动重开 / close</text>
+    <rect x="720" y="60" width="240" height="110" rx="12" fill="#171e2e" stroke="#ffce7a" stroke-dasharray="5 4"/>
+    <text x="840" y="86" fill="#ffce7a" font-size="12.5" text-anchor="middle">服务端 /api/openenv/{game}</text>
+    <text x="840" y="106" fill="#90a0c0" font-size="11" text-anchor="middle">一连接一实例 · 共享容量 64</text>
+    <text x="840" y="124" fill="#90a0c0" font-size="11" text-anchor="middle">固定版本与初始化输入重放</text>
+    <text x="840" y="148" fill="#90a0c0" font-size="11" text-anchor="middle">ProxyAdapter → 沙箱引擎</text>
+    <path d="M210 115 L240 115" stroke="#90a0c0" stroke-width="1.6" marker-end="url(#arr3)"/>
+    <path d="M440 115 L470 115" stroke="#90a0c0" stroke-width="1.6" marker-end="url(#arr3)"/>
+    <path d="M690 115 L720 115" stroke="#90a0c0" stroke-width="1.6" marker-end="url(#arr3)"/>
+    <!-- export path -->
+    <rect x="240" y="220" width="520" height="52" rx="10" fill="#1d2638" stroke="#6ea8ff"/>
+    <text x="500" y="244" fill="#dbe4f5" font-size="12" text-anchor="middle">export_onnx(net, game, path) → 上传托管（契约校验）→ 网页/自动参战</text>
+    <text x="500" y="262" fill="#90a0c0" font-size="11" text-anchor="middle">ONNX 标准 · 服务端 onnxruntime 推理（无需 torch · D4）</text>
+  </svg>
+  </div>
+
+  <div class="grid2">
+    <div class="note"><b>观测模式</b>：服务端（grid 张量，<code>obs_mode</code> 参数）或客户端从 raw state 计算
+      （snake 的 features / rotwin / reach，<code>sdk/gameplatform/games/snake_features.py</code>）。</div>
+    <div class="note"><b>奖励覆盖</b>（OpenEnv <code>reset</code>）：<code>rewards</code> 只接受游戏声明键，整局固定；
+      数值必须有限且绝对值不超过 1000，非法配置明确报错。</div>
+  </div>
+</section>
+
+<!-- ═══════════════ 对局闭环 ═══════════════ -->
+<section class="page" id="p-match">
+  <h2>对局闭环</h2>
+  <p class="lead">对战按游戏归属（D27）：大厅卡片 / 游戏页直入该游戏 PvP 页。房间（公开/私有 · ranked/casual）+ 快速匹配（ELO band 撮合）+ 断线重连 + 再来一局 + 观战 + 回放 + 分享链接。</p>
+  <div class="cards">
+    <div class="card"><div class="tag">D9 · 撮合</div><h4>ELO band + 时间放宽</h4><p>初始 ±100，每 5s 放宽 +100，上限 ±400，60s 后任意匹配——Lichess 式，简单可解释。</p></div>
+    <div class="card"><div class="tag">D10/D11</div><h4>ranked / casual 双轨</h4><p>好友私房默认 casual（防刷分）；模型独立 <code>model_ratings</code> 表（起始 1200，K=32），与人分榜隔离。</p></div>
+    <div class="card"><div class="tag">D12</div><h4>内存态队列</h4><p>会话/房间/匹配队列进程内态（重启失效）；SQLite 持久化对局结果与回放。</p></div>
+    <div class="card"><div class="tag">D3 延伸</div><h4>观战/回放逐位一致</h4><p>回放记录仍走平台 API；OpenEnv 按历史 version + seed/options reset，逐条 step 记录动作。渲染读会话 environment.schemas/meta，结束/错误/取消都关闭连接；PvE 记录实际对手动作。</p></div>
+  </div>
+</section>
+
+<!-- ═══════════════ UGC ═══════════════ -->
+<section class="page" id="p-ugc">
+  <h2>UGC 管线</h2>
+  <p class="lead">任何注册用户可上传游戏包（草稿 ≤5 / 公开 ≤3），管理员审核通过才公开；官方种子游戏与用户上传<b>同一条沙箱管线</b>（D26）。</p>
+
+  <div class="diagram">
+  <svg viewBox="0 0 1000 230" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <marker id="arr4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0 0 L10 5 L0 10 z" fill="#90a0c0"/>
+      </marker>
+    </defs>
+    <rect x="20" y="70" width="150" height="90" rx="12" fill="#1d2638" stroke="#6ea8ff"/>
+    <text x="95" y="94" fill="#dbe4f5" font-size="12" text-anchor="middle">作者上传 zip</text>
+    <text x="95" y="114" fill="#90a0c0" font-size="11" text-anchor="middle">game.yaml + 契约实现</text>
+    <text x="95" y="134" fill="#90a0c0" font-size="11" text-anchor="middle">≤20MB · 草稿态</text>
+    <rect x="205" y="70" width="170" height="90" rx="12" fill="#1d2638" stroke="#ffce7a"/>
+    <text x="290" y="94" fill="#ffce7a" font-size="12" text-anchor="middle">静态扫描 + 沙箱 smoke</text>
+    <text x="290" y="114" fill="#90a0c0" font-size="11" text-anchor="middle">AST 白名单 import</text>
+    <text x="290" y="134" fill="#90a0c0" font-size="11" text-anchor="middle">20 步冒烟测试通过</text>
+    <rect x="410" y="70" width="160" height="90" rx="12" fill="#1d2638" stroke="#6ea8ff"/>
+    <text x="490" y="94" fill="#dbe4f5" font-size="12" text-anchor="middle">提交审核 → 队列</text>
+    <text x="490" y="114" fill="#90a0c0" font-size="11" text-anchor="middle">管理员待审列表</text>
+    <text x="490" y="134" fill="#90a0c0" font-size="11" text-anchor="middle">可 reject（附理由）</text>
+    <rect x="605" y="70" width="150" height="90" rx="12" fill="#1d2638" stroke="#8be08b"/>
+    <text x="680" y="94" fill="#8be08b" font-size="12" text-anchor="middle">approve → published</text>
+    <text x="680" y="114" fill="#90a0c0" font-size="11" text-anchor="middle">注册 registry + 挂路由</text>
+    <text x="680" y="134" fill="#90a0c0" font-size="11" text-anchor="middle">只挂一次（_MOUNTED_SLUGS）</text>
+    <rect x="790" y="70" width="190" height="90" rx="12" fill="#171e2e" stroke="#b79bff"/>
+    <text x="885" y="94" fill="#b79bff" font-size="12" text-anchor="middle">业务与环境入口按能力开放</text>
+    <text x="885" y="114" fill="#90a0c0" font-size="11" text-anchor="middle">/play/* · AI / scores</text>
+    <text x="885" y="134" fill="#90a0c0" font-size="11" text-anchor="middle">/api/openenv/{game}</text>
+    <path d="M170 115 L205 115" stroke="#90a0c0" stroke-width="1.6" marker-end="url(#arr4)"/>
+    <path d="M375 115 L410 115" stroke="#90a0c0" stroke-width="1.6" marker-end="url(#arr4)"/>
+    <path d="M570 115 L605 115" stroke="#90a0c0" stroke-width="1.6" marker-end="url(#arr4)"/>
+    <path d="M755 115 L790 115" stroke="#90a0c0" stroke-width="1.6" marker-end="url(#arr4)"/>
+    <text x="500" y="210" fill="#90a0c0" font-size="12" text-anchor="middle">熔断（连续超限 paused）/ 下架 / 版本切换 → 注册表退出 → 路由 404 · 旧版本审核期继续服务（D24）</text>
+  </svg>
+  </div>
+
+  <h3>为什么 UGC 游戏自动获得 OpenEnv 面</h3>
+  <ul>
+    <li>OpenEnv 复用现有 <code>ProxyAdapter</code>（沙箱 worker 转发），游戏包继续实现 EnvAdapter；旧环境路由已删除。</li>
+    <li>契约方法 <code>info/new_state/step_state/validate_*</code> 已覆盖 OpenEnv server 的 schema/reset/step 需求；<code>obs</code> 缺失时观测自动回退 <code>{"type":"state","state":…}</code> 透传。</li>
+    <li>沙箱内不需要安装任何新库（D25：标准库白名单 + numpy 不变）。</li>
+  </ul>
+</section>
+
+<!-- ═══════════════ OpenEnv 环境入口 ═══════════════ -->
+<section class="page" id="p-openenv">
+  <h2>OpenEnv：唯一环境交互入口</h2>
+  <p class="lead">使用官方 <code>openenv==0.4.1</code> 的 <code>create_fastapi_app</code> 子应用与 <code>PlatformEnvironment</code>（backend/openenv_native.py）。每条 WS 连接拥有一个环境实例；游戏执行继续复用现有 EnvAdapter 和沙箱。原来的「并行附加兼容面」决定仅留作历史，现行契约见 <a href="api/openenv.md">docs/api/openenv.md</a>。</p>
+  <table>
+    <tr><th>OpenEnv 概念</th><th>当前契约</th><th>边界</th></tr>
+    <tr><td>reset</td><td><code>seed/version/options/obs_mode/rewards/include_state</code></td><td>seed 默认 0、非负；version 为可用已审核包，省略取当前版本；版本与奖励固定整局</td></tr>
+    <tr><td>step</td><td><code>{"type":"step","data":{"value": &lt;raw action&gt;}}</code></td><td>raw 为 int/list/dict，只提交游戏动作，不注入局面</td></tr>
+    <tr><td>observation</td><td>官方 <code>{type:"observation",data:{observation,reward,done,…}}</code></td><td>内部为 tensor（data/shape/dtype/state/metadata）或 state（state/metadata）；include_state 默认 false</td></tr>
+    <tr><td>环境描述</td><td>reset 的 <code>observation.metadata.environment</code></td><td>game/actions/obs_modes/schemas/meta/version/max_concurrent_envs；step 不重复整份描述</td></tr>
+    <tr><td>state</td><td><code>{episode_id, step_count, game_state, environment}</code></td><td>reset 前 game_state=null；reset 后 environment.schemas/meta 固定为本局版本，用于历史回放渲染</td></tr>
+    <tr><td>HTTP reset/step/state</td><td>官方端点仍存在，每个请求都是临时实例</td><td>HTTP reset 不为下次 step 留状态，无 state/action 注入信封；HTTP /schema 仅描述当前发布版本</td></tr>
+    <tr><td>WS 会话</td><td>一连接一实例，每游戏共享上限 64</td><td>容量非性能承诺；断线不续局，重连显式 reset，超时后不可盲目重发 step</td></tr>
+    <tr><td>任务集</td><td>split=<code>default</code>，task 为 seed 序列（10,000 个）</td><td>保留官方任务接口，不是环境批量推进</td></tr>
+  </table>
+  <pre><code>from openenv.core import GenericEnvClient
+
+with GenericEnvClient(base_url="http://127.0.0.1:8080/api/openenv/tetris").sync() as env:
+    info = env.state()["environment"]
+    env.reset(seed=42, version=info["version"], obs_mode="state")
+    result = env.step({"value": 3})
+    print(result.reward, result.done, result.observation["state"])</code></pre>
+  <div class="note"><b>观测与奖励</b>：obs_mode 默认取服务端首个模式，显式 state 请求当前适配器完整状态，其他值须由游戏声明；include_state=true 时张量也附带完整状态。rewards 只覆盖声明键、必须有限且绝对值不超过 1000。非法配置明确报错，环境 done 后不会自动 reset。完整快照和确定性重放只覆盖当前适配器能力，不代表任意复杂外部游戏已支持。</div>
+  <div class="note"><b>MCP</b>：沿用官方 <code>openenv/session/*</code> 会话机制与 <code>describe/new_episode/observe/act</code>；new_episode 支持同样的版本、观测和奖励配置。无论 WS/MCP，成功、错误、取消都应释放连接/会话。网页游客预览 reset 后即关闭；历史回放按原版本和 seed/options 重建，不用当前 /schema 渲染历史包。</div>
+</section>
+
+<!-- ═══════════════ 代码地图 ═══════════════ -->
+<section class="page" id="p-map">
+  <h2>代码地图</h2>
+  <p class="lead">按模块职责导航。环境相关职责按当前契约更新；数字保留初稿历史计数（2026-09），未重新统计，不能用于判断本次实现或测试状态。</p>
+
+  <h3>backend/（FastAPI 平台服务）</h3>
+  <table>
+    <tr><th>文件</th><th>行</th><th>职责</th></tr>
+    <tr><td><code>main.py</code></td><td>343</td><td>入口：注册表挂路由 + SPA + 文档 + 后台线程（会话清理/匹配扫描）</td></tr>
+    <tr><td><code>registry.py</code></td><td>18</td><td>游戏注册表（import 即注册，可注销）</td></tr>
+    <tr><td><code>game_routes.py</code></td><td>—</td><td>AI 咨询与 scores 平台业务路由，不提供环境步进</td></tr>
+    <tr><td><code>api_limits.py</code></td><td>—</td><td>平台 API 限流</td></tr>
+    <tr><td><code>environment_contract.py</code></td><td>—</td><td>环境描述与 JSON Schema</td></tr>
+    <tr><td><code>openenv_native.py</code></td><td>—</td><td>唯一环境入口：官方 PlatformEnvironment + create_fastapi_app，WS 会话、版本与观测/奖励配置</td></tr>
+    <tr><td><code>ugc.py · ugc_pack.py · ugc_runner.py · ugc_worker.py · ugc_proxy.py · ugc_routes.py · ugc_static.py</code></td><td>1,865</td><td>游戏库：包校验/静态扫描/沙箱 runner/代理注册/审核</td></tr>
+    <tr><td><code>sessions.py · play_routes.py</code></td><td>937</td><td>服务器权威会话（PvE/PvP）+ 房间 + 重连/rematch</td></tr>
+    <tr><td><code>matchmaking.py · matches.py · matches_routes.py</code></td><td>690</td><td>快速匹配（ELO band）+ PvP 落库 + 模型对战 worker + 回放</td></tr>
+    <tr><td><code>models.py · model_routes.py · inference.py</code></td><td>366</td><td>ONNX 托管与契约推理</td></tr>
+    <tr><td><code>auth.py · social.py · growth.py · stats 相关</code></td><td>—</td><td>账号/JWT/游客 · 好友/聊天/通知 · XP/等级 · 榜单</td></tr>
+    <tr><td><code>admin.py · admin_routes.py</code></td><td>464</td><td>公告/举报/管理后台</td></tr>
+    <tr><td><code>api_schemas.py</code></td><td>299</td><td>平台业务 OpenAPI 契约（play/match 等；环境 schema 在 OpenEnv 子应用）</td></tr>
+  </table>
+
+  <h3>sdk/（Python SDK，训练 + 全量 API 客户端）</h3>
+  <table>
+    <tr><th>文件</th><th>行</th><th>职责</th></tr>
+    <tr><td><code>remote.py</code></td><td>—</td><td>RemoteVecEnv：每槽独立官方 OpenEnv 连接，管理 seed/自动重开/终止观测/关闭</td></tr>
+    <tr><td><code>gym.py</code></td><td>161</td><td>gymnasium 包装（Env / VectorEnv）+ 注册 <code>platform-*-v0</code></td></tr>
+    <tr><td><code>client.py</code></td><td>527</td><td>PlatformClient / SessionClient（v1 API 全量封装）</td></tr>
+    <tr><td><code>export.py</code></td><td>92</td><td>export_onnx（导出即过契约）</td></tr>
+    <tr><td><code>games/snake_features.py · microrts_obs.py</code></td><td>266</td><td>客户端观测特征（features/rotwin/reach / microrts 逐单位特征）</td></tr>
+  </table>
+
+  <h3>其他</h3>
+  <table>
+    <tr><th>目录</th><th>行/文件</th><th>职责</th></tr>
+    <tr><td><code>packaged-games/</code></td><td>12 文件 · 2,012 行</td><td>官方种子游戏包（snake/tetris/microrts：game.yaml + env.py + ai/baseline + schemas）</td></tr>
+    <tr><td><code>training/</code></td><td>2 文件 · 351 行</td><td>snake_dqn.py / tetris_dqn.py（内置 DQN 权重的来源）</td></tr>
+    <tr><td><code>tests/</code></td><td>35 文件 · 234 用例</td><td>determinism / parity_live / env / play / pvp / ugc / openenv（官方协议 + GenericEnvClient E2E）等</td></tr>
+    <tr><td><code>web/src/</code></td><td>12 页 + 组件</td><td>React 18 + shadcn/ui：Lobby/对战/资料/观战/回放/UgPlay/UgPvp/UgUpload + UgBoard 通用棋盘</td></tr>
+    <tr><td><code>gdk-ug/</code></td><td>test_runner + template/examples</td><td>本地 GDK：包校验与冒烟（与线上沙箱同一逻辑）</td></tr>
+    <tr><td><code>deploy/</code></td><td>Dockerfile/compose/backup/tunnel</td><td>node 构建前端 → python 运行时多阶段镜像 + SQLite 备份</td></tr>
+    <tr><td><code>docs/design/</code></td><td>00–15 设计文档</td><td>蓝图/API 分类/账号/游玩/模型/匹配/UGC/解耦/OpenEnv 预研</td></tr>
+  </table>
+</section>
+
+<!-- ═══════════════ 决策日志 ═══════════════ -->
+<section class="page" id="p-decisions">
+  <h2>历史架构决策（Decision Log 精选）</h2>
+  <div class="note"><b>历史记录，不是当前环境契约。</b>下表保留当时决定；D2 的无状态批处理与设计 15 的并行附加面已被 <a href="api/openenv.md">唯一官方 OpenEnv 契约</a>取代，不保留旧环境 API。其他决策的现行边界见相应业务契约。</div>
+  <table>
+    <tr><th>#</th><th>决策</th><th>选择</th></tr>
+    <tr><td>D1</td><td>游玩 API 形态</td><td>会话制（有状态 session）——多人对战需要服务端持有对局状态</td></tr>
+    <tr><td>D2</td><td>训练 API 形态</td><td>无状态批处理 env API——已验证的高吞吐模式，同 seed 可复现</td></tr>
+    <tr><td>D3</td><td>一个引擎原则</td><td>游玩/训练共用一个 EnvAdapter 规则内核——动力学完全一致</td></tr>
+    <tr><td>D4</td><td>模型托管格式</td><td>ONNX（v1）——跨框架标准、服务端推理无需 torch、镜像小</td></tr>
+    <tr><td>D9/D10/D11</td><td>匹配与计分</td><td>ELO band + 时间放宽；ranked/casual 双轨；模型独立积分表</td></tr>
+    <tr><td>D12</td><td>队列/房间存储</td><td>v1 内存态（单容器）——规模小，避免过早引入分布式组件</td></tr>
+    <tr><td>D14</td><td>聊天与通知</td><td>v1 轮询 + 落库（不引入 WebSocket）——改动面最小</td></tr>
+    <tr><td>D18/D25</td><td>UGC 运行隔离/依赖</td><td>受限子进程沙箱 + 标准库白名单 + numpy——rlimit/超时/熔断</td></tr>
+    <tr><td>D26</td><td>游戏与平台的关系</td><td>取消内置/UGC 区分——官方种子包走同一条沙箱管线，平台零游戏名硬编码</td></tr>
+    <tr><td>D27</td><td>大厅/对战交互</td><td>/arena 移除；对战按游戏 slug（/games/&#123;slug&#125;/pvp）；历史曾讨论磁贴条控制台（已废弃，见设计 14）</td></tr>
+    <tr><td>D28（15）</td><td>OpenEnv 兼容层</td><td>单独提供一套 wire 对齐接口（自实现 + HTTP/WS）——并行附加面，不迁移</td></tr>
+  </table>
+</section>
+
+<footer>
+  <p><b>数据来源（provenance）</b>：本页初稿来自 2026-09 的源码勘察；代码地图数字保留当时统计，不是本次测量。
+  本次读取本页、README、运行时契约、GDK 指南、历史设计索引与验收说明后，按
+  <a href="api/openenv.md">docs/api/openenv.md</a>（权威契约）更新环境架构与示例，并参照
+  <code>backend/openenv_native.py</code> 的会话、观测、MCP/任务实现片段。
+  业务文档与历史决策保留，未重新审计全部源码、未运行服务/测试或验证部署。
+  当前模块导航：<code>backend/game_routes.py</code>、<code>backend/api_limits.py</code>、
+  <code>backend/environment_contract.py</code>、<code>backend/openenv_native.py</code>、
+  <code>sdk/gameplatform/remote.py</code>、<code>sdk/gameplatform/gym.py</code>；环境以官方 0.4.1 契约为准。</p>
+</footer>
+
+</div>
+<script>
+  const tabs = document.querySelectorAll('#tabs button');
+  tabs.forEach(b => b.addEventListener('click', () => {
+    tabs.forEach(x => x.classList.toggle('on', x === b));
+    document.querySelectorAll('section.page').forEach(s => s.classList.toggle('on', s.id === 'p-' + b.dataset.p));
+    window.scrollTo({top: 0, behavior: 'smooth'});
+  }));
+</script>
+</body>
+</html>

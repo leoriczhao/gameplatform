@@ -1,0 +1,44 @@
+slug: tetris
+title: 俄罗斯方块
+description: 10×20 棋盘俄罗斯方块：0=左移 1=右移 2=旋转 3=硬降；消行得分 1/4/9/16（1/2/3/4 行）
+version: 1.1.0
+board:
+  schema: 2
+  width: 10
+  height: 20
+  cell: { size: 26, gap: 1, radius: 2 }
+  background: { kind: grid, colors: ["#f8fafc"], line: "#eef2f7" }
+  palette:
+    "0": {}
+    "1": { color: "#00b8d9" }
+    "2": { color: "#f7e05c" }
+    "3": { color: "#a66bff" }
+    "4": { color: "#3ddc84" }
+    "5": { color: "#f5222d" }
+    "6": { color: "#2f6bff" }
+    "7": { color: "#fa8c16" }
+    active: { color: "#4f46e5", shadow: true, enter: { effect: pop, ms: 120 } }
+  hud:
+    - { kind: stat, label: 分数, path: score, color: "#4f46e5" }
+    - { kind: badge, label: 行数, path: lines }
+    - { kind: miniboard, label: NEXT, path: next_board, width: 4, height: 4, cell: 14,
+        palette: { "0": {}, "1": { color: "#00b8d9" }, "2": { color: "#f7e05c" },
+                   "3": { color: "#a66bff" }, "4": { color: "#3ddc84" },
+                   "5": { color: "#f5222d" }, "6": { color: "#2f6bff" },
+                   "7": { color: "#fa8c16" } } }
+  events:
+    - { name: clear, effect: { kind: flash, color: "#ffffff", ms: 240 } }
+contract:
+  in_shape: [1, 2, 20, 10]
+  out_shape: [1, 4]
+  protocol: simple
+  obs_mode: grid
+ai_strategies: [baseline]
+controls:
+  mode: absolute
+  keys:
+    ArrowLeft: [0, "左移"]
+    ArrowRight: [1, "右移"]
+    ArrowUp: [2, "旋转"]
+    ArrowDown: [3, "硬降"]
+    Space: [3, "硬降"]

@@ -1,0 +1,944 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stream API 文档 · 亮色 IA 稿（mock）</title>
+<style>
+:root {
+  --bg: #fafafa;
+  --surface: #ffffff;
+  --border: #e4e4e7;
+  --text: #19191c;
+  --muted: #71717a;
+  --accent: #4f46e5;
+  --accent-soft: #eef2ff;
+  --green: #059669;
+  --amber: #d97706;
+  --red: #dc2626;
+  --code-bg: #f4f4f5;
+  --code-border: #e4e4e7;
+  --sidebar-w: 268px;
+  --top-h: 52px;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 72px; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  line-height: 1.65;
+}
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* top bar — keep external nav affordance */
+.topbar {
+  position: sticky; top: 0; z-index: 40;
+  height: var(--top-h);
+  display: flex; align-items: center; gap: 16px;
+  padding: 0 20px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.topbar .brand { font-weight: 650; color: var(--text); letter-spacing: -0.02em; }
+.topbar nav { display: flex; gap: 14px; flex-wrap: wrap; font-size: 13.5px; }
+.topbar nav a { color: var(--muted); }
+.topbar nav a.emphasis { color: var(--accent); font-weight: 600; }
+.topbar .badge-mock {
+  margin-left: auto; font-size: 11px; color: var(--muted);
+  border: 1px solid var(--border); border-radius: 999px; padding: 2px 8px;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
+  max-width: 1180px;
+  margin: 0 auto;
+  min-height: calc(100vh - var(--top-h));
+}
+
+/* sticky TOC */
+.sidebar {
+  position: sticky; top: var(--top-h);
+  align-self: start;
+  height: calc(100vh - var(--top-h));
+  overflow: auto;
+  padding: 16px 12px 28px;
+  border-right: 1px solid var(--border);
+  background: var(--bg);
+}
+.sidebar h2 {
+  margin: 0 0 10px;
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  border: none; padding: 0;
+}
+.search-wrap { position: relative; margin-bottom: 14px; }
+.search-wrap input {
+  width: 100%;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 8px 10px 8px 32px;
+  font-size: 13px;
+  color: var(--text);
+  outline: none;
+}
+.search-wrap input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.search-wrap .ico {
+  position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
+  width: 14px; height: 14px; color: var(--muted); pointer-events: none;
+}
+.search-hint { font-size: 11px; color: var(--muted); margin: -6px 0 12px; }
+
+.toc-group { margin-bottom: 12px; }
+.toc-group > summary, .toc-group-label {
+  list-style: none;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--text);
+  margin: 0 0 4px;
+  padding: 4px 8px;
+  cursor: default;
+}
+.toc-group ul { list-style: none; margin: 0; padding: 0 0 0 4px; }
+.toc-group li a {
+  display: block;
+  padding: 5px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--muted);
+  text-decoration: none;
+}
+.toc-group li a:hover { background: var(--surface); color: var(--text); }
+.toc-group li a.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+.toc-group li.hidden, .toc-group.hidden { display: none; }
+
+.content {
+  padding: 28px 32px 96px;
+  max-width: 860px;
+}
+.content > h1 { font-size: 28px; margin: 0 0 8px; letter-spacing: -0.02em; }
+.content > h1 + p { color: var(--muted); margin-top: 0; }
+.content h2 {
+  margin-top: 40px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  font-size: 20px;
+  scroll-margin-top: 72px;
+}
+.content h3 { margin-top: 22px; font-size: 15.5px; }
+.content p, .content li { color: #3f3f46; }
+.content table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 13.5px; }
+.content th, .content td { border: 1px solid var(--border); padding: 7px 10px; text-align: left; }
+.content th { background: #f4f4f5; color: var(--text); }
+.content section.hidden-by-search { display: none; }
+
+.hero-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 18px 20px;
+  margin: 18px 0 8px;
+  box-shadow: 0 1px 2px rgba(0,0,0,.04);
+}
+.hero-title { margin: 0 0 6px; font-size: 18px; border: none; padding: 0; }
+.hero-desc { margin: 0 0 12px; color: var(--muted); font-size: 14px; }
+.loop-steps {
+  display: flex; flex-wrap: wrap; gap: 8px;
+  list-style: none; margin: 0 0 12px; padding: 0;
+}
+.loop-steps li a {
+  display: inline-block;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.loop-steps li a:hover { background: #e0e7ff; }
+.hero-links { margin: 0; font-size: 13px; color: var(--muted); }
+
+/* light code blocks */
+code {
+  background: var(--code-bg);
+  border: 1px solid var(--code-border);
+  border-radius: 5px;
+  padding: 1px 6px;
+  font-size: 13px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  color: #18181b;
+}
+pre {
+  background: var(--code-bg);
+  border: 1px solid var(--code-border);
+  border-radius: 8px;
+  padding: 14px 16px;
+  overflow-x: auto;
+  color: #18181b;
+}
+pre code { background: none; border: none; padding: 0; color: inherit; }
+
+.badge {
+  display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 999px;
+  border: 1px solid var(--border); color: var(--muted); margin-left: 6px;
+  background: #fafafa;
+}
+.get { color: var(--green); font-weight: 650; }
+.post { color: var(--amber); font-weight: 650; }
+.del { color: var(--red); font-weight: 650; }
+.put { color: #0284c7; font-weight: 650; }
+.note {
+  border-left: 3px solid var(--accent);
+  background: var(--accent-soft);
+  padding: 10px 14px; border-radius: 0 8px 8px 0; margin: 14px 0;
+  color: #3730a3;
+}
+.warn {
+  border-left: 3px solid var(--red);
+  background: #fef2f2;
+  padding: 10px 14px; border-radius: 0 8px 8px 0; margin: 14px 0;
+  color: #991b1b;
+}
+
+.mock-banner {
+  background: #fffbeb; border: 1px solid #fde68a; color: #92400e;
+  border-radius: 8px; padding: 8px 12px; font-size: 12.5px; margin-bottom: 16px;
+}
+
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; }
+  .sidebar {
+    position: relative; top: 0; height: auto; max-height: none;
+    border-right: none; border-bottom: 1px solid var(--border);
+  }
+  .content { padding: 20px 16px 64px; }
+}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="/">Stream</a>
+  <nav>
+    <a href="/">大厅</a>
+    <a href="/models">模型托管</a>
+    <a class="emphasis" href="/api.html">API 文档</a>
+    <a href="/docs">Swagger</a>
+  </nav>
+  <span class="badge-mock">UI mock · 非生产页</span>
+</header>
+
+<div class="layout">
+  <aside class="sidebar" aria-label="文档目录">
+    <h2>本页目录</h2>
+    <div class="search-wrap">
+      <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+      <input id="toc-search" type="search" placeholder="过滤章节 / 路径…" autocomplete="off" />
+    </div>
+    <p class="search-hint">轻量过滤 TOC 与正文标题（非全文引擎）</p>
+    <nav id="toc"></nav>
+  </aside>
+
+  <main class="content" id="doc-main">
+    <div class="mock-banner">CHANGE-20261015-api-docs-light · UX 交互稿：亮色壳 + 粘性侧栏 TOC + 检索过滤。契约正文取自现网 <code>static-docs/api.html</code>，未捏造接口。</div>
+    <h1>Stream API 文档</h1>
+
+<section id="quickstart" class="hero-card" data-toc-group="快速开始">
+  <h2 class="hero-title">训练闭环入口</h2>
+  <p class="hero-desc">主路径：OpenEnv 采样 → SDK 导出 ONNX → 模型托管 → PvE / PvP / 模型对战 → 积分。下方为接口分类总览；侧栏可跳到鉴权、环境、模型等章节。</p>
+  <ol class="loop-steps">
+    <li><a href="#env">① OpenEnv</a></li>
+    <li><a href="#sdk">② SDK 导出</a></li>
+    <li><a href="#models">③ 上传托管</a></li>
+    <li><a href="#play">④ 游玩验证</a></li>
+    <li><a href="#matches">⑤ 对战积分</a></li>
+  </ol>
+  <p class="hero-links">交互式契约：<a href="/docs">Swagger UI</a> · <a href="/openapi.json">OpenAPI schema</a> · Base URL <code>https://games.cree1p.com</code></p>
+</section>
+
+<h1>Stream API 文档</h1>
+<p>多游戏 RL 平台：每个游戏提供<b>官方 OpenEnv 环境交互</b>（WS 会话，训练算法在客户端、环境在后端）与<b>前端界面</b>（人工 / 内置 AI 演示 / 模型）。注册账号后可用<b>会话制对战</b>（PvE / 人 vs 人 PvP）、<b>ONNX 模型托管</b>与<b>模型对战</b>。Base URL：<code>https://games.cree1p.com</code>，业务 HTTP 与环境 WS 均使用 JSON。本文描述当前契约，不代表本次变更已部署或完成验收。平台业务交互式文档见 <a href="/docs">Swagger UI</a> 与 <a href="/openapi.json">OpenAPI schema</a>。</p>
+
+<h2 id="overview">接口分类总览</h2>
+<table>
+<tr><th>类别</th><th>接口</th><th>鉴权</th><th>说明</th></tr>
+<tr><td><b>① 平台级</b></td><td><code>GET /api/games</code> · <code>GET /api/health</code></td><td>无</td><td>游戏目录（含每游戏元数据）、健康检查</td></tr>
+<tr><td><b>② 环境交互（唯一入口）</b></td><td><code>/api/openenv/{game}</code> · <code>WS /ws</code></td><td>无</td><td>官方 OpenEnv 0.4.1，<b>一连接一实例</b>；<code>reset/step/state</code>，每游戏共享并发上限 64</td></tr>
+<tr><td><b>③ 在线游玩</b></td><td><code>POST /api/{game}/ai/action</code> · <code>GET/POST /api/{game}/scores</code></td><td>无</td><td>内置 AI 演示、排行榜</td></tr>
+<tr><td><b>④ 账号 v1</b></td><td><code>POST /api/v1/auth/register|login|guest</code> · <code>GET /api/v1/auth/me</code></td><td>—</td><td>注册/登录返回 JWT；游客每人一个浏览器身份</td></tr>
+<tr><td><b>⑤ 游玩会话 v1</b></td><td><code>POST/GET /api/v1/{game}/play/sessions/*</code><br><code>/api/v1/{game}/play/rooms*</code></td><td>登录用户（游客只能观战/看榜）</td><td><b>服务器权威</b>对局：PvE 单人打 AI/模型、PvP 房间（公开列表/邀请码）+ ranked/casual</td></tr>
+<tr><td><b>⑥ 模型托管 v1</b></td><td><code>POST/GET/DELETE /api/v1/models/*</code></td><td>Bearer（用户）</td><td>上传 ONNX → 契约校验 → PvE 对手 / 模型代打 / 模型对战</td></tr>
+<tr><td><b>⑦ 对战与积分 v1</b></td><td><code>POST/GET /api/v1/matches/*</code> · <code>GET /api/v1/ratings/{game}</code></td><td>Bearer（用户）</td><td>模型 vs 模型异步对战、对局记录、ELO 积分榜</td></tr>
+<tr><td><b>⑧ 自定义模型协议</b></td><td>你自己的 HTTPS 服务（游戏每步 <code>POST {state}</code> 给你，你返回 <code>{"action":…}</code>）</td><td>—</td><td>训练产物挂进网页对战（详见 <a href="#custom">自定义模型</a>）</td></tr>
+</table>
+<p><b>闭环</b>：② OpenEnv 采样 + 客户端训练 → SDK 导出 ONNX → ⑥ 上传托管 → ⑤/⑦ PvE、PvP、模型对战 → ⑦ 积分。② 与 ⑤ 背后是<b>同一套游戏引擎</b>（同一 <code>step_state</code>），当前游戏在固定版本、相同 seed/options 与动作输入下重建相同轨迹。</p>
+
+
+
+<h2 id="auth">账号与鉴权 v1</h2>
+<p>密码 <b>bcrypt(cost 12)</b> 存储；登录/注册返回 <b>JWT（HS256）</b>。需要鉴权的接口带请求头 <code>Authorization: Bearer &lt;token&gt;</code>。用户名 3-24 字符，密码 8-128 字符。</p>
+
+<h3><span class="post">POST</span> /api/v1/auth/register <span class="badge">注册（自动登录）</span></h3>
+<pre><code>{"username":"alice","password":"password123"}
+→ {"token":"eyJ…","user":{"id":1,"username":"alice","nickname":"alice","role":"user","status":"active"}}</code></pre>
+
+<h3><span class="post">POST</span> /api/v1/auth/login</h3>
+<pre><code>{"username":"alice","password":"password123"} → {"token":"eyJ…","user":{…}}
+401 {"detail":"用户名或密码错误"}</code></pre>
+
+<h3><span class="post">POST</span> /api/v1/auth/guest <span class="badge">游客身份</span></h3>
+<p>游客身份：返回一个<b>每浏览器唯一</b>的游客 JWT（<code>sub=guest-&lt;uuid&gt;</code>），用于浏览、观战与限流配额区分（<b>创建游玩会话需要登录账号</b>）。共享 NAT 下各浏览器互不冲突。</p>
+<pre><code>POST /api/v1/auth/guest → {"token":"eyJ…","user":{"id":null,"username":"guest-…","role":"guest"}}</code></pre>
+
+<h3><span class="get">GET</span> /api/v1/auth/me</h3>
+<pre><code>Authorization: Bearer &lt;token&gt; → {"user":{…}}    # 游客 token 返回 401</code></pre>
+
+<h2 id="gdk">游戏接入 GDK（v2，13 G3 后统一为游戏包）</h2>
+<p>接入新游戏 = 打一个<b>游戏包</b>（zip：game.yaml 声明 + <code>__init__.py</code> 暴露 <code>get_adapter()</code> + 可选只读资源）。平台在沙箱中运行它，并自动获得 OpenEnv 环境入口、AI 咨询、榜单、大厅卡片、会话制游玩（PvE/PvP）、模型托管——官方种子游戏（snake/tetris/microrts）与用户上传走完全同一条管线。包规范 v2 与完整步骤（模型契约、渲染、控件）见 <code>docs/design/12</code>/<code>13</code> 与 <code>gdk-ug/</code>。</p>
+<pre><code>my-game/
+  game.yaml     # slug/title/version/board(palette)/units/contract/pvp/controls/opponents…
+  __init__.py   # def get_adapter() -> EnvAdapter（info/new_state/step_state/validate_*/obs/ai_action…）
+  weights.npz   # （可选）只读资源，.npz/.npy/.bin
+# 本地自测：python gdk-ug/test_runner.py my-game
+# 平台发布：官方包放 packaged-games/（启动自动播种）或用户经 /api/v1/ugc/games 上传审核</code></pre>
+
+<h2 id="ops">运营 v1.0-d（公告/举报/管理后台）</h2>
+<p>首个管理员由环境变量 <code>ADMIN_USERNAME</code>/<code>ADMIN_PASSWORD</code> 启动时自动创建（已存在则提权为 admin）。封禁=登录拒绝；模型下架=<code>models.status='banned'</code>（所有消费方只认 active）。</p>
+
+<h3><span class="get">GET</span> /api/v1/announcements <span class="badge">全站公告（公开）</span></h3>
+<pre><code>→ {"items":[{"id","body","active","created_at"}]}    # 只返回生效中的公告</code></pre>
+
+<h3><span class="post">POST</span> /api/v1/reports <span class="badge">举报（登录）</span></h3>
+<pre><code>{"target_type":"user|model|match|chat","target_id":N,"reason":"…"?} → {"report":{…}}</code></pre>
+
+<h3>管理后台 /api/v1/admin/*（role=admin，否则 403）</h3>
+<pre><code>GET  /admin/dashboard                     # 注册数/24h 新注册/DAU(24h 有 XP 事件)/活跃会话/对局数/模型数/待处理举报
+GET  /admin/users · POST /admin/users/{id}/status {status:active|banned}   # 封禁即登录拒绝；不可封 admin/自己
+GET  /admin/models · POST /admin/models/{id}/status {status:active|banned} # 下架/恢复
+GET  /admin/matches                       # 最近对局（全量）
+GET  /admin/reports[?status=] · POST /admin/reports/{id}/status {status:open|resolved|dismissed}
+GET  /admin/announcements · POST /admin/announcements {body}
+POST /admin/announcements/{id}/active {status:"on"|"off"}</code></pre>
+
+<h2 id="growth">成长与排行 v1.0-c（XP/等级/统计/周榜）</h2>
+<p>数值见 <code>docs/design/08-成长与赛事数值.md</code>：PvP 对局结束 +10 XP、胜者额外 +15；PvE 完成 +5（胜利再 +5）；等级曲线 <code>xp(n) = 50·n·(n-1)</code>（L2=100）。每次 ELO 结算落 <code>rating_history</code> 一行供走势图。周榜 = 最近 7 天按胜场数聚合。</p>
+
+<h3><span class="get">GET</span> /api/v1/stats/me <span class="badge">我的战绩</span></h3>
+<pre><code>→ {"xp":N,"level":N,"level_progress":0..1,
+   "totals":{"games","wins","losses","draws","win_rate",
+              "current_streak","best_streak","play_seconds"},
+   "games":{"microrts":{"games","wins","rating","history":[{rating,created_at}…]}}}
+口径：只统计已落库的人 vs 人对局；需登录</code></pre>
+
+<h3><span class="get">GET</span> /api/v1/leaderboards/{game}?scope=total|weekly</h3>
+<pre><code>total  → 现有 ELO 榜（K=32，起始 1200）
+weekly → 最近 7 天聚合：按胜场降序（同胜场看局数、再看本周 XP），含 games/wins/xp
+需登录；scope 非法 422；未知游戏 404</code></pre>
+
+<h2 id="social">身份与社交 v1.0-b（资料/好友/聊天/通知）</h2>
+<p>好友 v1 按用户名<b>直接互加</b>（无需同意，双向可见）；房间聊天与通知均为<b>轮询 + SQLite 落库</b>（D14，刷新不丢，无 WebSocket）。</p>
+
+<h3><span class="get">GET</span> /api/v1/profile · <span class="put">PUT</span> /api/v1/profile</h3>
+<pre><code>→ {"profile":{"id","username","nickname","avatar","signature","role","created_at"}}
+PUT {"nickname":"…"?,"avatar":"🦊"?,"signature":"…"?}   # 部分更新；昵称 1-24 / 头像 ≤16 / 签名 ≤120 字符</code></pre>
+
+<h3>好友</h3>
+<pre><code>GET    /api/v1/friends            → {"friends":[{…资料…,"in_game":bool}]}
+POST   /api/v1/friends            {"username":"…"}  → 互加 + 给对方发 friend_add 通知
+DELETE /api/v1/friends/{id}       → 双向删除
+错误：404 用户不存在 · 400 不能加自己 / 已经是好友</code></pre>
+
+<h3>房间聊天（对局双方，D14 轮询）</h3>
+<pre><code>GET  /api/v1/{game}/play/sessions/{id}/chat?since=0
+     → {"messages":[{"id","nickname","text","created_at"}],"next_since":N}
+POST /api/v1/{game}/play/sessions/{id}/chat  {"text":"…"}   # 1-500 字符
+仅对局双方可用（403）；since 游标只取新消息；历史落库，刷新不丢</code></pre>
+
+<h3>通知（铃铛轮询）</h3>
+<pre><code>GET  /api/v1/notifications         → {"items":[…],"unread":N}
+GET  /api/v1/notifications/unread  → {"unread":N}
+POST /api/v1/notifications/read    → 全部标记已读</code></pre>
+
+<h2 id="play">游玩会话 v1（服务器权威对局）</h2>
+<p>服务器持有<b>权威状态</b>；客户端提交动作推进 tick。<b>创建会话需要登录账号</b>（游客只能观战/看榜）。PvE 单人（可带服务端对手）；PvP 双人（邀请码、双方提交后推进、超时判负）。会话存于内存，空闲 30 分钟回收；每用户并发 8 局。提交动作可带 <code>expected_tick</code>，与服务端当前 tick 不一致返回 409（防网络重试双推进）。</p>
+
+<h3><span class="post">POST</span> /api/v1/{game}/play/sessions <span class="badge">创建/加入</span></h3>
+<pre><code>PvE: {"kind":"pve","seed":42?,"opponent":{…}?,"controller":{…}?}
+     opponent:   {"type":"ai","strategy":"light_rush"}          # 内置策略（microrts）
+              |  {"type":"model","model_id":N}                  # 托管模型（登录）
+              |  {"type":"external_bot","url":"https://…"}      # 你自己的 bot
+     controller: {"type":"model","model_id":N}                  # 模型代打（snake/tetris，登录）
+PvP: {"kind":"pvp"}                     # 创建房间（兼容默认 ranked + private）
+     {"kind":"pvp","mode":"ranked|casual","visibility":"public|private"}?
+     {"kind":"pvp","invite":"OD2ZX4"}   # 凭邀请码加入
+→ {"session":{…},"invite":"OD2ZX4"?,"side":"p0|p1"?}</code></pre>
+<p><code>session</code> 字段：<code>id, game, kind, status, tick, state, winner, cause, opponent, invite, mode, visibility, players, p1_joined</code>。<code>status</code>：<code>waiting</code>（PvP 等对手）→ <code>active</code> → <code>finished</code>（另有 <code>abandoned/cancelled</code>）。</p>
+
+<h3>房间 v1.0-a（公开大厅 / 邀请码双轨，06 M1）</h3>
+<p>房间 = <code>waiting</code> 状态 PvP 会话的正式化。公开房间出现在大厅列表，任何人可加入；私有房间凭邀请码加入。<code>ranked</code> 结算 ELO，<code>casual</code> 只落对局记录不计分（D10）。房间与队列均为内存态，服务重启即失效。</p>
+
+<h3><span class="get">GET</span> /api/v1/{game}/play/rooms <span class="badge">公开房间列表</span></h3>
+<pre><code>GET /api/v1/microrts/play/rooms[?mode=ranked|casual]    # 需登录
+→ {"rooms":[{"id":…,"game":…,"mode":"ranked|casual","visibility":"public",
+           "invite":"OD2ZX4","host":"房主","host_id":N,"created_at":…},…]}
+仅返回等待中的公开房间；5 秒轮询由前端驱动。</code></pre>
+
+<h3><span class="post">POST</span> /api/v1/{game}/play/rooms <span class="badge">创建房间</span></h3>
+<pre><code>{"mode":"casual|ranked","visibility":"public|private","settings":{"seed":N}?}
+默认 casual + public（D10：练习局不计分）；private 房间仅凭邀请码加入。
+→ {"session":{…},"invite":"OD2ZX4","side":"p0"}</code></pre>
+
+<h3><span class="post">POST</span> /api/v1/{game}/play/rooms/{id}/join <span class="badge">加入房间</span></h3>
+<pre><code>{"invite":"OD2ZX4"?}    # public 免码；private 必须携带正确邀请码（不区分大小写）
+→ {"session":{…},"invite":"OD2ZX4","side":"p1"}
+错误：404 房间不存在 · 400 邀请码无效 / 不能加入自己的房间 / 房间已满或已开始</code></pre>
+
+<h3>快速匹配 v1.0-a（队列 + ELO band 撮合，06 §5 / D9）</h3>
+<p>每个 (game, mode) 一个内存队列；ranked 与 casual 分开撮合。ranked 撮合 band 初始 ±100，每 5 秒 +100 至 ±400，等满 60 秒任意对手；casual 不分差直接撮合。撮合即自动创建内部 PvP 房间（private，不进大厅列表，p0=先入队者），双方轮询 status 拿到房间 id 后进入对局。同账号不互配；同一对未打完不重复撮合；每人每游戏最多 1 个队列（重复入队=更新模式）；10 分钟无结果自动移出；队列内存态，重启失效。</p>
+
+<h3><span class="post">POST</span> /api/v1/{game}/matchmaking/queue <span class="badge">进入队列</span></h3>
+<pre><code>{"mode":"ranked|casual"}   # 需登录；重复入队=更新参数
+→ {"queued":true,"matched":false,"mode":"ranked","position":1,"wait_seconds":0,"session_id":null}
+已撮合时直接返回 {"queued":false,"matched":true,"session_id":"…"}</code></pre>
+
+<h3><span class="get">GET</span> /api/v1/{game}/matchmaking/status <span class="badge">排队状态（2s 轮询）</span></h3>
+<pre><code>→ {"queued":true|false,"matched":true|false,"mode":…,"position":N,"wait_seconds":N,"session_id":…}
+matched=true 时 session_id 为撮合出的房间 id（读取即消费该条目）；未排队时 queued=false</code></pre>
+
+<h3><span class="delete">DELETE</span> /api/v1/{game}/matchmaking/queue <span class="badge">取消排队</span></h3>
+<pre><code>→ {"queued":false}    # 即时生效</code></pre>
+
+<h3>断线重连 + 再来一局 v1.0-a（06 §7 U5/U7）</h3>
+<p>刷新/断线后凭 <code>GET /api/v1/play/active</code> 找回自己未完成的 waiting/active 会话（含阵营 side、tick）；对局结束后的 <code>rematch</code> 复制 settings/mode/visibility、<b>互换 p0/p1</b> 并开新房间把双方带回（幂等：双方各点一次进同一个新房间）。断线期间由现有超时策略兜底（60s 空过、连续 5 次判负）。</p>
+
+<h3><span class="get">GET</span> /api/v1/play/active <span class="badge">我的进行中对局</span></h3>
+<pre><code>→ {"sessions":[{"id":…,"game":…,"kind":"pvp","status":"waiting|active",
+              "tick":N,"side":"p0|p1","mode":…,"visibility":…,"players":[…],…},…]}
+需登录；只含自己是参与者的会话（PvP 或本人 PvE），按最近活动排序</code></pre>
+
+<h3><span class="post">POST</span> /api/v1/{game}/play/sessions/{id}/rematch <span class="badge">再来一局</span></h3>
+<pre><code>→ {"session":{…新房间…},"invite":"…","side":"p0|p1"}
+仅 finished 对局可用（400）；仅原双方可用（403）；先后手互换；
+对已开过的 rematch 重复调用返回同一个新房间</code></pre>
+
+<h3>观战 + 回放 v1.0-a（06 §7 U6 / 07 M4）</h3>
+<p><b>观战</b>：<code>GET /api/v1/{game}/play/sessions/{id}</code> 非玩家返回 <code>side:null</code>（只读）。公开房间的对局与快速匹配撮合的对局任何人可围观；<b>私有房间仅双方可读</b>（403）。前端观战页 <code>/watch/{game}/{sessionId}</code> 2s 轮询、只读棋盘 + 双方提交指示。</p>
+<p><b>回放</b>：对局记录保存 <code>game_version</code>、<code>seed</code>、<code>options</code> 与 <code>moves</code>。回放器通过 OpenEnv 按原版本和初始化参数 reset，在同一 WS 连接逐条 step；渲染使用会话 <code>environment.schemas/meta</code>，完成/错误/取消均关闭连接。与 play 共用现有 EnvAdapter；分享链接 <code>/watch/match/{id}</code> 任何人可直接打开。缺版本、seed 或原包的历史记录不可用最新版猜测重建。</p>
+
+<h3><span class="get">GET</span> /api/v1/matches/{id}/replay <span class="badge">对局回放（公开只读）</span></h3>
+<pre><code>→ {"replay":{"schema_version":1,"match_id":N,"game":…,"game_version":"1.0.0",
+             "players":[{user_id,name,side}],"result":{winner,cause,damage,mode},
+             "seed":N,"options":{},"moves":[
+             {"tick":0,"action":{"p0":[…],"p1":[…]},"opponent":null},…]}}
+无需登录；仅 finished 对局（PvE / PvP / model_vs_model）；旧记录可能缺版本或 seed</code></pre>
+
+<h3><span class="get">GET</span> /api/v1/{game}/play/sessions/{sid} <span class="badge">查询/轮询</span></h3>
+<p>返回当前状态；PvP 下触发服务端超时策略（见下）。非玩家可读（观战视角 <code>side:null</code>）。</p>
+
+<h3><span class="post">POST</span> /api/v1/{game}/play/sessions/{sid}/actions <span class="badge">提交动作 → 推进 tick</span></h3>
+<pre><code>{"actions": 0|1|2|3}                          # snake/tetris
+{"actions": [[unit_id, cmd, dir?, type?], …]}  # microrts
+{"actions": null}                              # 仅模型代打会话（服务器自己算）
+{"actions": 1, "expected_tick": 7}             # 可选：乐观并发；不匹配 409（刷新后重试）
+
+PvE 响应: {"state":{…},"tick":N,"done":false,"winner":null,"cause":null,
+          "reward":0.0,"status":"active"}
+PvP 响应: {"state":{…},"tick":N,"done":false,"advanced":false,
+          "waiting_for":"p1","status":"active"}
+          # advanced=true 表示双方指令到齐、本 tick 已推进</code></pre>
+
+<h3>PvE 流程</h3>
+<ol>
+<li><code>POST play/sessions {kind:"pve", opponent:{"type":"ai","strategy":"light_rush"}}</code>（microrts；snake/tetris 不传 opponent）</li>
+<li>循环：读 <code>state</code> → 决策 → <code>POST actions</code> → 拿新 state（服务端对手自动同步行动）</li>
+<li><code>done=true</code> → 结束，响应带权威 <code>match_id</code>；用 <code>POST /api/{game}/scores {"match_id":…}</code> 领榜（分数由服务端从该对局读取，客户端不能自报）</li>
+</ol>
+
+<h3>PvP 流程（人 vs 人）</h3>
+<ol>
+<li>玩家 A：<code>POST play/sessions {kind:"pvp"}</code> → <code>invite</code>（6 位邀请码），<code>side="p0"</code>（蓝方），status=<code>waiting</code></li>
+<li>玩家 B：<code>POST play/sessions {kind:"pvp","invite":"OD2ZX4"}</code> → status=<code>active</code>，<code>side="p1"</code>（红方）</li>
+<li>双方各自攒指令并 <code>POST actions</code>；一方提交后响应 <code>waiting_for</code> 指对方</li>
+<li><b>双方都提交后</b>服务器推进一 tick（<code>advanced:true</code>）；用 <code>GET</code> 轮询观察对手提交与推进</li>
+<li>每步限时 60 秒：超时自动空过（<code>players[].submitted</code> 与 tick 会变化），连续 5 次超时判负；<code>POST leave</code> 认输 → 对方胜</li>
+<li>结束后自动落库为对局记录；<b>ranked</b> 按 <b>ELO（K=32，起始 1200）</b>结算双方积分，<b>casual</b> 只落记录不计分（D10）</li>
+<li>大厅流程：<code>GET play/rooms</code> 看公开房间 → <code>POST play/rooms/{id}/join</code> 直接加入（private 房凭邀请码）；同账号不可加入自己的房间</li>
+</ol>
+
+<h3><span class="post">POST</span> /api/v1/{game}/play/sessions/{sid}/leave <span class="badge">认输/退出</span></h3>
+<pre><code>PvP 认输 → {"status":"finished","winner":1}   # 对方获胜；等待中的房间被创建者取消
+PvE 退出 → {"status":"abandoned"}</code></pre>
+
+<h3><span class="get">GET</span> /api/v1/{game}/play/sessions/{sid}/replay <span class="badge">回放</span></h3>
+<pre><code>{"id":…,"game":…,"kind":…,"seed":…,"players":[…],"opponent":…,
+ "moves":[{"tick":0,"action":…,"opponent":…},…],"result":{…}}</code></pre>
+<p>回放是<b>每 tick 动作日志</b>，可用环境 API 离线重放（同 seed 同轨迹）。</p>
+
+<h2 id="models">模型托管 v1（ONNX）</h2>
+<p>只接受 <b>ONNX</b>（onnxruntime CPU 推理）。上传时服务端校验：≤20MB、能加载、输入/输出 shape 匹配该游戏的标准契约；每游戏最多保留 5 个活跃模型。SDK 的 <code>export_onnx</code> 保证导出即合规。</p>
+
+<table>
+<tr><th>契约</th><th>游戏</th><th>输入</th><th>输出</th><th>推理语义</th></tr>
+<tr><td><code>game.snake</code></td><td>snake</td><td><code>float32[1,1334]</code> rotwin R=10 观测</td><td><code>float32[1,3]</code> Q 值</td><td>simple：obs→argmax</td></tr>
+<tr><td><code>game.tetris</code></td><td>tetris</td><td><code>float32[1,2,20,10]</code> 双通道棋盘</td><td><code>float32[1,4]</code> Q 值</td><td>simple：obs→argmax</td></tr>
+<tr><td><code>game.microrts</code></td><td>microrts</td><td><code>float32[1,1546]</code> 6×16×16 网格 + 10 维单位特征</td><td><code>float32[1,140]</code> cmd×dir×type logits</td><td>composite：model_inputs 逐单位 → 批量 run → model_decode（mask 后 argmax）</td></tr>
+</table>
+
+<h3><span class="post">POST</span> /api/v1/models <span class="badge">上传</span></h3>
+<pre><code>multipart/form-data:  file=&lt;.onnx&gt;  game=microrts  name=我的DQN
+Authorization: Bearer &lt;token&gt;
+→ {"model":{"id":3,"owner_id":1,"game":"microrts","name":"我的DQN",
+            "model_type":"onnx","io_contract":"game.microrts","meta":{},
+            "status":"active","created_at":1.7e9}}
+400 {"detail":"输入 shape 不匹配：期望 (1,1546)（game.microrts），实际 (1,256)"}</code></pre>
+
+<h3><span class="get">GET</span> /api/v1/models <span class="badge">我的模型列表</span></h3>
+<h3><span class="get">GET</span> /api/v1/models/{id}</h3>
+<h3><span class="del">DELETE</span> /api/v1/models/{id}</h3>
+<h3><span class="post">POST</span> /api/v1/models/{id}/eval <span class="badge">标准评估</span></h3>
+<p>服务端跑 3 局（snake/tetris 记分；microrts 打内置 AI 记胜率），返回指标：</p>
+<pre><code>→ {"model_id":3,"metrics":{"games":3,"avg_score":…,"avg_length":…,
+   "scores":[…],"win_rate":0.33}}   # win_rate 仅 microrts</code></pre>
+<div class="note">托管模型的三种用途：① PvE 对手 <code>{"type":"model","model_id":N}</code>；② 模型代打（controller）；③ 模型 vs 模型对战（下节）。模型之间、模型与内置 AI 均可异步对战。</div>
+
+<h2 id="matches">对战与积分 v1</h2>
+
+<h3><span class="post">POST</span> /api/v1/matches <span class="badge">创建模型对战（异步）</span></h3>
+<pre><code>{"game":"microrts","model_a":3,"model_b":5}          # 双方都是托管模型
+{"game":"microrts","model_a":3,"model_b":"ai:light_rush"}  # vs 内置 AI
+→ {"match_id":7}</code></pre>
+<p>对战在服务端后台线程运行（最多 1500 tick），上限 8 局并发。可用 <code>GET /api/v1/matches/{id}</code> 轮询：<code>status: queued → running → finished|failed</code>；结果与<b>逐 tick 回放</b>存库。</p>
+
+<h3><span class="get">GET</span> /api/v1/matches <span class="badge">我的对局</span></h3>
+<p>你的 PvP 对局 + 你参与/拥有的模型对战，最新在前。每项含 <code>kind(pvp|model_vs_model), players, models, status, result{winner,cause,damage,tick}, replay</code>。</p>
+
+<h3><span class="get">GET</span> /api/v1/matches/{id} <span class="badge">对局详情（含回放）</span></h3>
+
+<h3><span class="get">GET</span> /api/v1/ratings/{game} <span class="badge">ELO 积分榜</span></h3>
+<pre><code>→ {"items":[{"user_id":1,"rating":1216.0,"games":1,"wins":1,"name":"bob"},…]}</code></pre>
+<p>仅人 vs 人 PvP 结算：ELO K=32、起始 1200，平局各半。模型对战不计分。</p>
+
+<h2 id="platform">平台级 API</h2>
+
+<h3><span class="get">GET</span> /api/games</h3>
+<p>已注册游戏目录（前端大厅的数据源）。</p>
+<pre><code>{
+  "games": [
+    { "id": "snake", "name": "贪吃蛇 · DQN", "description": "…",
+      "has_ai": true, "openenv_url": "/api/openenv/snake",
+      "schema_url": "/api/openenv/snake/schema",
+      "page_url": "/games/snake/", "score_bounds": [0, 1000] },
+    { "id": "tetris", "name": "俄罗斯方块", "has_ai": true,
+      "score_bounds": [0, 1000000], "…": "…" },
+    { "id": "microrts", "name": "微RTS", "has_ai": true, "…": "…" }
+  ]
+}</code></pre>
+
+<h3><span class="get">GET</span> /api/health</h3>
+<pre><code>{"status":"ok","games":{"snake":{"grid":[20,20],"has_ai":true},
+                         "tetris":{"grid":[10,20],"has_ai":true},
+                         "microrts":{"grid":[16,16],"has_ai":true}},
+ "active_sessions":0,"db_size_bytes":262144,"time":1700000000}
+# v1.0-e 起附加运行指标：活跃会话数（内存）与 SQLite 数据库字节数</code></pre>
+
+<h2 id="env">环境交互（唯一官方 OpenEnv 入口）</h2>
+<p>环境基址为 <code>/api/openenv/{game}</code>，目录 <code>GET /api/games</code> 提供 <code>openenv_url</code> 与 <code>schema_url</code>。仅使用官方 <code>openenv==0.4.1</code> 栈；旧环境 API 已删除，不保留别名、重定向或兼容服务器。账号、play、模型、排行榜和回放记录等平台业务 API 不变。完整权威说明见仓库 <code>docs/api/openenv.md</code>。</p>
+<p><b>WS 一连接一实例</b>：官方 <code>GenericEnvClient.reset/step/state</code> 在同一连接操作服务端环境。训练算法与模型可在调用方运行，但环境计算在后端，不是完全离线训练。底层仍是现有 <code>EnvAdapter</code> 和沙箱游戏包；不表示任意复杂外部游戏引擎已接入。</p>
+<div class="warn"><b>生命周期与容量</b>：当前每游戏最多 64 个并发环境，所有客户端共享，不是吞吐保证。关闭连接销毁会话。超时或断线后不要盲目重发 step（先前动作可能已执行）；当前无断线续局，重连后显式 reset。成功、错误和取消路径均应关闭连接。</div>
+
+<h2 id="openenv">官方 OpenEnv 协议（0.4.1）</h2>
+<p>每游戏挂载官方 <code>create_fastapi_app</code> 子应用（<code>backend/openenv_native.py</code>），不是与旧环境 API 并行的兼容面。全局环境目录为 <code>GET /api/openenv/list_environments</code>。</p>
+
+<h3>端点（相对环境基址）</h3>
+<table>
+<tr><th>类别</th><th>端点</th><th>说明</th></tr>
+<tr><td>WS 会话</td><td><code>WS /ws</code></td><td>同一连接内 <code>reset/step/state</code>；服务端保存该实例的局面</td></tr>
+<tr><td>HTTP 描述</td><td><code>GET /schema /metadata /health</code></td><td>当前发布版本的 wire schema、元数据与健康信息</td></tr>
+<tr><td>HTTP 临时实例</td><td><code>POST /reset /step</code> · <code>GET /state</code></td><td>每请求新建临时实例，HTTP reset 不为下一次 step 留下状态；不能读取 WS 会话，也没有旧 state/action 注入信封</td></tr>
+<tr><td>任务（ORS 形状）</td><td><code>GET /{env}/splits</code> · <code>POST /{env}/tasks /num_tasks /task /task_range</code></td><td>task = seed 序列（split <code>default</code>，10,000 个）</td></tr>
+<tr><td>MCP</td><td><code>POST /mcp</code>（JSON-RPC）</td><td>官方 <code>tools/list</code> + <code>tools/call</code>，会话用 <code>openenv/session/create|close</code></td></tr>
+</table>
+
+<h3>reset：固定版本与整局配置</h3>
+<pre><code>{"type":"reset","data":{"seed":42,"version":"1.0.0","options":{},
+                        "obs_mode":"state","rewards":{},"include_state":true}}</code></pre>
+<ul>
+<li><code>seed</code> 为非负整数，默认 0；<code>options</code> 由游戏定义。</li>
+<li><code>version</code> 省略时使用当前发布版本；显式指定必须是仍可用的已审核包。reset 固定本局版本，发布/回滚不让进行中的局面换动力学；下架/暂停仍使会话不可用。SDK 默认持续钉住初始化时读取的版本。</li>
+<li><code>obs_mode</code> 缺省为首个服务端观测模式；显式 <code>state</code> 请求当前适配器完整状态，其他值必须由游戏声明。</li>
+<li><code>rewards</code> 只覆盖已声明奖励键，在整局内固定；值必须有限且绝对值不超过 1000。</li>
+<li><code>include_state</code> 默认 false，true 时张量观测也附带完整 state；非法配置明确报错。</li>
+</ul>
+
+<h3>step 与 observation</h3>
+<pre><code>{"type":"step","data":{"value":1}}
+→ {"type":"observation","data":{"observation":{…},"reward":0.0,"done":false,…}}</code></pre>
+<p><code>value</code> 是游戏原始动作（整数、命令列表或复合对象），不含调用方注入的局面。reset/step 均返回官方 observation 响应，其中 <code>observation</code> 为：</p>
+<pre><code># 张量观测；include_state=true 时 state 为完整局面
+{"type":"tensor","data":[…],"shape":[…],"dtype":"float32","state":null,"metadata":{…}}
+# 状态观测
+{"type":"state","state":{…},"metadata":{…}}</code></pre>
+<p>reset 的 <code>observation.metadata.environment</code> 包含 <code>game/name/actions/obs_modes/schemas/meta/version/max_concurrent_envs</code> 等描述，step 不重复整份描述。完整状态是当前快照型适配器的能力，不要求所有未来游戏的策略观测公开内部状态。环境本身在 done 后不会自动 reset。</p>
+
+<h3>state 与网页/历史回放</h3>
+<pre><code>{"type":"state"}
+→ {"type":"state","data":{"episode_id":null,"step_count":0,"game_state":null,
+    "environment":{"game":"tetris","version":"1.0.0","max_concurrent_envs":64,…}}}</code></pre>
+<p>reset 前 <code>game_state=null</code>，environment 描述当前版本；reset 后是本局状态与固定版本的 <code>environment.schemas/meta</code>。HTTP <code>/schema</code> 仅描述当前发布版本，不可替代历史包渲染配置。网页读取会话动作描述；游客预览 reset 获取初始状态后关闭连接，不创建 play Session。</p>
+<p>回放记录仍来自平台业务 API；重建使用原 <code>version + seed + options</code> reset，再在同一连接逐条 step 记录动作，从返回状态渲染，最后关闭连接。确定性保证仅适用于固定版本、相同初始化参数与动作输入的当前游戏引擎，不扩展为任意外部引擎的 seed/快照支持。</p>
+
+<h3>官方 Python 客户端（自动管理 WS 连接）</h3>
+<pre><code>from openenv.core import GenericEnvClient
+
+with GenericEnvClient(base_url="http://127.0.0.1:8080/api/openenv/tetris").sync() as env:
+    info = env.state()["environment"]
+    first = env.reset(seed=42, version=info["version"],
+                      obs_mode="state", include_state=True)
+    result = env.step({"value": 3})
+    print(result.reward, result.done, result.observation["state"])</code></pre>
+
+<h3>MCP 工具</h3>
+<table>
+<tr><th>工具</th><th>参数</th><th>用途</th></tr>
+<tr><td><code>describe</code></td><td>—</td><td>动作空间、obs_modes、JSON Schema、默认奖励</td></tr>
+<tr><td><code>new_episode</code></td><td><code>seed/options/version/obs_mode/rewards/include_state</code></td><td>按与 reset 相同的配置新开一局</td></tr>
+<tr><td><code>observe</code></td><td>—</td><td>当前局面与 reward/done/step_count/metadata</td></tr>
+<tr><td><code>act</code></td><td><code>action</code>（int / 指令列表 / dict）</td><td>推进当前局面</td></tr>
+</table>
+<pre><code># session_id 让状态跨 tools/call 保持；使用完毕或失败/取消后也要 close
+POST /api/openenv/snake/mcp  {"jsonrpc":"2.0","id":1,"method":"openenv/session/create"}
+  → {"result":{"session_id":"…"}}
+POST /api/openenv/snake/mcp  {"jsonrpc":"2.0","id":2,"method":"tools/call",
+     "params":{"name":"new_episode","arguments":{"seed":42,"obs_mode":"state"},"session_id":"…"}}
+POST /api/openenv/snake/mcp  {"jsonrpc":"2.0","id":3,"method":"tools/call",
+     "params":{"name":"act","arguments":{"action":1},"session_id":"…"}}
+POST /api/openenv/snake/mcp  {"jsonrpc":"2.0","id":4,"method":"openenv/session/close",
+     "params":{"session_id":"…"}}
+# 不带 session_id 时每次调用新建临时实例，不能跨调用续局</code></pre>
+<p>环境交互免登录；游戏下架/暂停后该 slug 不可用。MCP 的 <code>reset/step/state/close</code> 为保留工具名，平台使用上表工具名。</p>
+<h2 id="snake">游戏：贪吃蛇 <code>snake</code></h2>
+<p>20×20 网格。与 <code>snake.cree1p.com</code> 的环境<b>逐位一致</b>（同 seed 同轨迹）。</p>
+<table>
+<tr><th>state 字段</th><th>说明</th></tr>
+<tr><td><code>body</code></td><td>蛇身格子 <code>[[x,y],…]</code>，<code>body[0]</code> 是蛇头，至少 2 格</td></tr>
+<tr><td><code>direction</code></td><td>绝对朝向 0=上 1=下 2=左 3=右</td></tr>
+<tr><td><code>food</code></td><td><code>[x,y]</code> 或 <code>null</code></td></tr>
+<tr><td><code>score / tick / seed / done / cause / grid</code></td><td>cause: <code>wall|self|win|null</code></td></tr>
+</table>
+<ul>
+<li><b>动作（相对朝向）</b>：<code>0</code>=左转 <code>1</code>=直行 <code>2</code>=右转（180° 掉头不存在）</li>
+<li><b>奖励</b>：<code>{"food":1.0,"step":-0.01,"death":-1.0}</code>（可覆盖）；吃豆 <code>score+1</code>，食物由 <code>(seed, tick)</code> 确定性生成</li>
+<li><b>obs（服务端）</b>：<code>grid</code> = 3×22×22 补边网格（ch0 危险=墙+蛇身含头，ch1 蛇头，ch2 食物）；模型契约用 rotwin <code>(1,1334)</code></li>
+</ul>
+
+<h2 id="tetris">游戏：俄罗斯方块 <code>tetris</code></h2>
+<p>10×20 棋盘，7 种方块，<b>7-bag</b> 出块（由 <code>(seed, bag_idx)</code> 确定性生成，同 seed 同轨迹）。</p>
+<table>
+<tr><th>state 字段</th><th>说明</th></tr>
+<tr><td><code>board</code></td><td>20×10 整数矩阵：<code>0</code>=空，<code>1..7</code>=已锁定的方块 id+1</td></tr>
+<tr><td><code>piece</code></td><td><code>{"id":0..6,"rot":0..3,"x":int,"y":int}</code>，当前活动方块</td></tr>
+<tr><td><code>next</code></td><td>下一块 id（0=I 1=O 2=T 3=S 4=Z 5=J 6=L）</td></tr>
+<tr><td><code>bag / bag_pos / bag_idx</code></td><td>7-bag 状态（当前适配器的状态快照；OpenEnv 会话在服务端持有局面）</td></tr>
+<tr><td><code>score / lines / tick / seed / done / cause / grid</code></td><td>cause: <code>lockout|null</code></td></tr>
+</table>
+<ul>
+<li><b>动作</b>：<code>0</code>=左移 <code>1</code>=右移 <code>2</code>=顺时针旋转（带基础踢墙） <code>3</code>=硬降</li>
+<li><b>自由动作语义</b>：左/右/旋转不推进 <code>tick</code>、奖励恒 0；<b>只有硬降</b>推进 tick、锁块、消行</li>
+<li><b>奖励</b>：<code>{"line":1.0,"step":-0.01,"death":-1.0}</code>；硬降时 <code>reward = step + k²·line (+ death)</code>，k=本次消行数；方块出生即碰撞 → 游戏结束（lockout）</li>
+<li><b>obs（服务端）</b>：<code>grid</code> = 2×20×10（ch0 已锁方块 0/1，ch1 活动方块 0/1）——即模型契约输入</li>
+</ul>
+
+<h2 id="microrts">游戏：微RTS <code>microrts</code></h2>
+<p>16×16 微型 RTS（<a href="https://github.com/Farama-Foundation/MicroRTS" target="_blank" rel="noopener">MicroRTS</a> 规则移植）：采矿 → 建造兵营 → 爆兵 → 摧毁敌方全部单位。</p>
+<table>
+<tr><th>state 字段</th><th>说明</th></tr>
+<tr><td><code>terrain</code></td><td>16×16：<code>0</code>=空地 <code>1</code>=墙 <code>2</code>=金矿（由 seed 确定性生成：8 矿 4 墙）</td></tr>
+<tr><td><code>units</code></td><td>双方单位数组：<code>{id, owner(0|1), type, x, y, hp, carry, cd, busy}</code>；type: base/barracks/worker/light/heavy/ranged</td></tr>
+<tr><td><code>bank</code></td><td><code>[我方金币, 敌方金币]</code>（初始各 5 金，MicroRTS 标准）</td></tr>
+<tr><td><code>damage</code></td><td><code>[我方累计伤害, 敌方累计伤害]</code>（时间到按此判胜负）</td></tr>
+<tr><td><code>tick / seed / time_limit / done / winner / cause</code></td><td>time_limit 4000；cause: <code>eliminated|time</code></td></tr>
+<tr><td><code>opponent</code></td><td><code>worker_rush|light_rush|ranged_rush|external</code>（模式开关，见下）</td></tr>
+</table>
+<h3>指令（复合动作）</h3>
+<pre><code>[[unit_id, cmd, dir?, type?], …]     # 每个 tick 每个空闲单位一条指令
+cmd: 0=wait 1=move(dir) 2=harvest(dir) 3=return(dir) 4=build(dir,type)
+     5=produce(dir,type) 6=attack(dir)   dir: 0=N 1=E 2=S 3=W
+单位/属性：base hp10 → 产工人(1金,50t)；worker hp1 攻1 → 采/回/建兵营(5金,100t)
+           barracks hp4 → 轻骑(2金,80t) 重骑(3金,120t) 射手(2金,100t)
+            轻骑 hp4 攻2 · 重骑 hp10 攻4 · 射手 hp2 攻1 射程3 · 攻速冷却 4t
+胜负：摧毁对方全部单位；4000 tick 内未分胜负按伤害判定（平局 winner=null）</code></pre>
+<h3>两种对战模式（由 OpenEnv <code>reset</code> 的 <code>options.opponent</code> 决定）</h3>
+<ul>
+<li><b>单代理 vs 内置策略</b>（默认）：<code>opponent ∈ {worker_rush, light_rush, ranged_rush}</code>——对方策略在服务端环境内部运行，API 动作只需提交<b>己方（p0）</b>的指令列表（与 snake/tetris 同构，SDK 零改动）</li>
+<li><b>双代理 external</b>：<code>opponent = "external"</code>——API 动作为 <code>{"p0": [cmds], "p1": [cmds]}</code>，双方都由调用方控制（人机/机机对战，训练自对弈）。<b>游玩会话（PvE/PvP）即此模式的服务端封装</b></li>
+</ul>
+<ul>
+<li><b>obs（服务端）</b>：<code>grid</code> = 6×16×16 通道（墙/金矿/我方单位/敌方单位/我方建筑/敌方建筑）</li>
+<li><b>奖励</b>：<code>{"win":1.0,"loss":-1.0,"damage":0.01}</code>；每 tick <code>reward = 本 tick 实际伤害×damage</code>，终局 + win/loss（p0 视角）</li>
+<li><b>示例</b>：连接 <code>/api/openenv/microrts</code> 的 GenericEnvClient，<code>env.reset(seed=42, options={"opponent":"light_rush"})</code> 后，在同一连接 <code>env.step({"value":[[0,5,1,"worker"]]})</code> 让基地向东产工人</li>
+</ul>
+
+<h2 id="ai">内置 AI 演示</h2>
+<div class="warn"><b>限流</b>：游客/IP <b>30 req/s</b>，登录用户（Bearer）<b>60 req/s</b>，超限返回 429。</div>
+<h3><span class="post">POST</span> /api/snake/ai/action</h3>
+<p>训练好的 DQN（rotwin R=10，1334 维观测，MLP 1334→128→64→3）。请求沿用原 snake 服务的最小载荷：</p>
+<pre><code>{"body": [[10,10],[9,10],[8,10]], "direction": 3, "food": [15,10]}
+→ {"action": 1, "action_name": "straight", "q": [94.2, 97.3, 94.7]}</code></pre>
+<h3><span class="post">POST</span> /api/tetris/ai/action</h3>
+<p>启发式基线（Dellacherie 一子搜索：聚合高度/空洞/不平整度/消行）。请求传完整 state：</p>
+<pre><code>{"state": {…tetris state…}}
+→ {"action": 1, "action_name": "right"}</code></pre>
+<h3><span class="post">POST</span> /api/microrts/ai/action</h3>
+<p>确定性内置策略（MicroRTS 经典脚本 bot）。请求传完整 state + 可选策略名：</p>
+<pre><code>{"state": {…microrts state…}, "strategy": "light_rush"}   # 默认 worker_rush
+→ {"action": [[0, 5, 1, "worker"], [2, 1, 3], …], "strategy": "light_rush"}</code></pre>
+
+<h2 id="scores">排行榜</h2>
+<h3><span class="get">GET</span> /api/{game}/scores?limit=N</h3>
+<pre><code>{"items":[{"rank":1,"name":"…","score":42,"mode":"human","created_at":1.7e9}]}</code></pre>
+<p>按分数降序、同分先提交者在前；<code>mode</code> ∈ <code>human|ai|custom</code>；limit 1..100。</p>
+<h3><span class="post">POST</span> /api/{game}/scores <span class="badge">凭对局领分</span></h3>
+<pre><code>{"match_id": 123, "name": "…"?}   # 需登录；分数由服务端从这场 PvE 对局读取
+→ {"id":1,"rank":7,"name":"…","score":42,"mode":"human","match_id":123}
+# 别人的对局 403；对局不存在 404；同一场对局重复领 400；未登录 401</code></pre>
+<div class="warn"><b>限流</b>：提交按身份分档——游客/IP <b>1 req/s</b>，登录用户（Bearer）<b>5 req/s</b>，超限返回 429；GET 不限流。</div>
+
+<h2 id="ugc">用户上传游戏 UGC v1.1（docs/design/10-11）</h2>
+<p>注册用户可上传自己的游戏包（<code>game.yaml</code> + <code>__init__.py</code> 暴露 <code>get_adapter()</code>），经<b>沙箱冒烟 + AST 静态扫描 + 管理员审核</b>后公开发布，自动获得官方 OpenEnv 环境入口、网页游玩、榜单、PvP 房间/快速匹配/ELO（声明 <code>pvp.enabled</code> 时）、观战回放等全部平台能力。包只允许使用平台 venv 已有库（标准库白名单 + numpy）。</p>
+<table>
+<tr><th>端点</th><th>鉴权</th><th>说明</th></tr>
+<tr><td><code>POST /api/v1/ugc/games</code>（multipart <code>file</code> + <code>changelog</code>）</td><td>用户</td><td>上传为草稿（≤20MB；配额：草稿 ≤5 / 公开 ≤3）</td></tr>
+<tr><td><code>GET /api/v1/ugc/games</code> · <code>?status=published</code></td><td>用户 / 公开</td><td>我的游戏列表 / 公开目录</td></tr>
+<tr><td><code>POST /api/v1/ugc/games/{id}/versions</code></td><td>用户（作者）</td><td>上传新版本（版本号必须递增）</td></tr>
+<tr><td><code>POST /api/v1/ugc/games/{id}/submit</code></td><td>用户（作者）</td><td>提交审核（draft → pending）</td></tr>
+<tr><td><code>POST /api/v1/ugc/games/{id}/unpublish</code></td><td>用户（作者）</td><td>作者自行下架（published → draft）</td></tr>
+<tr><td><code>POST /api/v1/ugc/games/{id}/test</code></td><td>用户（作者）</td><td>沙箱冒烟重跑</td></tr>
+<tr><td><code>DELETE /api/v1/ugc/games/{id}</code></td><td>用户（作者）</td><td>删除草稿</td></tr>
+<tr><td><code>GET /api/v1/admin/ugc</code> · <code>?status=all</code></td><td>admin</td><td>审核队列 / 全部游戏</td></tr>
+<tr><td><code>POST /api/v1/admin/ugc/{id}/approve|reject|ban|unban|pause|resume|rollback|retest</code></td><td>admin</td><td>审核通过/驳回（附意见）/下架/恢复/暂停/恢复/回滚/重测</td></tr>
+</table>
+<pre><code># game.yaml 渲染声明（通用 JSON 棋盘渲染器据此绘制 state.board / state.units）
+board: { width: 10, height: 10, palette: { empty: { glyph: "·", color: "#e4e4e7" } } }
+units: { player: { glyph: "🙂" } }
+pvp: { enabled: true, action: choice, choices: ["石头","剪刀","布"] }   # 可选，action: unit|choice
+ai_strategies: ["binary"]                                             # 可选，需实现 opponent_action
+contract: { in_shape: [1,64], out_shape: [1,4] }                      # 可选，ONNX 托管契约</code></pre>
+<p>已公开游戏的元数据出现在 <code>GET /api/games</code>（<code>author</code>/<code>pvp_enabled</code>/<code>meta</code>；13 G3 起不再有 <code>source</code> 内置/UGC 之分，官方包 author=「官方」）；前端入口：<code>/games/{slug}</code> 单机、<code>/games/{slug}/pvp</code> 对战、<code>/ugc</code> 作者工作台。</p>
+
+<h2 id="custom">自定义模型协议（🔌 挂自己的 bot）</h2>
+<p>游戏页面的「🔌 自定义模型」模式：填一个你自己的 <b>HTTPS</b> 服务 URL，游戏每步 POST 状态过去，按返回的动作走。你的模型在<b>你自己机器</b>上跑，平台只提供环境。也支持作为游玩会话的 <code>external_bot</code> 对手。</p>
+<table>
+<tr><th>方向</th><th>载荷</th></tr>
+<tr><td>游戏 → 模型</td><td><code>{"state": {…完整 state…}}</code>（三个游戏通用）</td></tr>
+<tr><td>模型 → 游戏（任选）</td><td>snake/tetris：<code>{"action": 0|1|2|3}</code> / 裸数字；microrts：<code>{"action": [[unit_id, cmd, dir?, type?], …]}</code> / 裸指令列表</td></tr>
+</table>
+<div class="warn"><b>硬性要求</b>：模型 URL 必须 <b>HTTPS</b>（页面是 https，浏览器拦截 mixed content；本地可用 <code>cloudflared tunnel --url http://localhost:8080</code>）+ 返回 <code>Access-Control-Allow-Origin: *</code> CORS 头。</div>
+<div class="note">对比托管 ONNX：自定义 bot 逻辑任意（可读全量 state）但不参与托管模型对战；托管模型按标准契约校验、可在 PvE/PvP/模型对战中使用。</div>
+
+<h2 id="sdk">Python SDK（训练 → 导出 → 上传 → 对战）</h2>
+<pre><code>cd sdk && pip install -e .        # openenv==0.4.1 / numpy / requests / gymnasium（torch 仅训练需要）
+</code></pre>
+
+<h3>客户端训练（OpenEnv + Gymnasium 包装）</h3>
+<p>向量包装每槽管理一条独立 OpenEnv 连接，不再使用单 HTTP 请求批量推进，不承诺旧批处理吞吐。seed 推进、自动重开和终止观测由 SDK 管理；每游戏 64 个环境额度由全部客户端共享。</p>
+<pre><code>from gameplatform import RemoteVecEnv            # 每个环境独立连接
+envs = RemoteVecEnv(game="tetris", n=16, obs_mode="grid",
+                    base_url="http://127.0.0.1:8080")
+try:
+    obs = envs.reset()                            # grid/state；snake 特征也可在 SDK 从状态计算
+    obs, rewards, dones, infos = envs.step([3] * 16)
+finally:
+    envs.close()
+
+import gameplatform.gym                           # 注册 platform-snake-v0 / platform-tetris-v0
+import gymnasium as gym
+from stable_baselines3 import PPO
+with gym.make("platform-tetris-v0", obs_mode="grid", base_url="http://127.0.0.1:8080") as env:
+    model = PPO("MlpPolicy", env).learn(total_timesteps=100_000)  # 算法在本地，环境在后端</code></pre>
+<p>gym 封装只注册 <code>snake</code>/<code>tetris</code>（离散动作）。复合动作游戏（microrts）请直接用 <code>RemoteVecEnv</code> 传指令列表，或按模型契约导出 ONNX。</p>
+
+<h3>导出 ONNX（符合托管契约）</h3>
+<pre><code>from gameplatform.export import export_onnx
+export_onnx(my_net, game="snake", path="my_dqn.onnx")   # 校验 shape，通过即过上传检查
+# snake→(1,1334)→(1,3) · tetris→(1,2,20,10)→(1,4) · microrts→(1,1546)→(1,140)</code></pre>
+
+<h3>上传 + 模型对战（PlatformClient）</h3>
+<pre><code>from gameplatform import PlatformClient
+c = PlatformClient(base_url="https://games.cree1p.com")
+c.register("alice", "password123")                 # 或 c.login(...) / c.guest()
+model = c.upload_model("my_dqn.onnx", game="snake", name="我的DQN")
+c.eval_model(model["id"])                          # 服务端 3 局标准评估
+mid = c.create_match(game="microrts", model_a=3, model_b="ai:light_rush")
+m = c.wait_match(mid)                              # 轮询直到 finished
+print(c.ratings("microrts"))                       # ELO 积分榜</code></pre>
+
+<h3>全量 API 玩（SessionClient，服务器权威会话）</h3>
+<pre><code>from gameplatform import PlatformClient
+s = PlatformClient().session("microrts")           # 或 PlatformClient(token=…)
+s.start_pve(opponent="worker_rush")                # PvE：内置 AI / 托管模型 / 外部 bot
+while not s.done:
+    s.act(build_commands(s.state))                 # 你本地任意决策逻辑
+
+p = PlatformClient(token=…).session("microrts").create_pvp()
+print("邀请码:", p.invite)                          # 朋友 join_pvp(p.invite)
+while not p.done:
+    p.act(my_commands); p.poll()                   # 双方提交后推进；poll 观察对手</code></pre>
+
+<p style="margin-top:48px;color:var(--muted)">Stream · <a href="/">游戏大厅</a> · <a href="/models">模型托管</a> · <a href="/docs">Swagger UI</a></p>
+
+  </main>
+</div>
+
+<script>
+(function () {
+  // TOC groups from real h2 ids (steering)
+  const GROUPS = [
+    {
+      label: "快速开始",
+      items: [
+        { id: "quickstart", title: "训练闭环入口" },
+        { id: "overview", title: "接口分类总览" },
+      ],
+    },
+    {
+      label: "鉴权与账号",
+      items: [{ id: "auth", title: "账号与鉴权 v1" }],
+    },
+    {
+      label: "环境 OpenEnv",
+      items: [
+        { id: "env", title: "环境交互边界" },
+        { id: "openenv", title: "官方 OpenEnv 0.4.1" },
+      ],
+    },
+    {
+      label: "游玩",
+      items: [{ id: "play", title: "游玩会话 v1" }],
+    },
+    {
+      label: "模型",
+      items: [
+        { id: "models", title: "模型托管 v1" },
+        { id: "custom", title: "自定义模型协议" },
+        { id: "sdk", title: "Python SDK" },
+      ],
+    },
+    {
+      label: "对战积分",
+      items: [
+        { id: "matches", title: "对战与积分 v1" },
+        { id: "scores", title: "排行榜" },
+      ],
+    },
+    {
+      label: "平台/游戏",
+      items: [
+        { id: "platform", title: "平台级 API" },
+        { id: "snake", title: "贪吃蛇 snake" },
+        { id: "tetris", title: "俄罗斯方块 tetris" },
+        { id: "microrts", title: "微RTS microrts" },
+        { id: "ai", title: "内置 AI 演示" },
+      ],
+    },
+    {
+      label: "运营与社交",
+      items: [
+        { id: "ops", title: "运营 v1.0-d" },
+        { id: "growth", title: "成长与排行" },
+        { id: "social", title: "身份与社交" },
+        { id: "ugc", title: "UGC v1.1" },
+        { id: "gdk", title: "游戏接入 GDK" },
+      ],
+    },
+  ];
+
+  const toc = document.getElementById("toc");
+  GROUPS.forEach((g) => {
+    const wrap = document.createElement("div");
+    wrap.className = "toc-group";
+    wrap.dataset.label = g.label;
+    const label = document.createElement("div");
+    label.className = "toc-group-label";
+    label.textContent = g.label;
+    wrap.appendChild(label);
+    const ul = document.createElement("ul");
+    g.items.forEach((it) => {
+      const li = document.createElement("li");
+      li.dataset.id = it.id;
+      li.dataset.text = (g.label + " " + it.title + " " + it.id).toLowerCase();
+      const a = document.createElement("a");
+      a.href = "#" + it.id;
+      a.textContent = it.title;
+      a.dataset.id = it.id;
+      li.appendChild(a);
+      ul.appendChild(li);
+    });
+    wrap.appendChild(ul);
+    toc.appendChild(wrap);
+  });
+
+  // Active section highlight
+  const links = [...toc.querySelectorAll("a")];
+  const targets = links
+    .map((a) => document.getElementById(a.dataset.id))
+    .filter(Boolean);
+  const setActive = (id) => {
+    links.forEach((a) => a.classList.toggle("active", a.dataset.id === id));
+  };
+  if ("IntersectionObserver" in window) {
+    const io = new IntersectionObserver(
+      (entries) => {
+        const vis = entries
+          .filter((e) => e.isIntersecting)
+          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+        if (vis[0]) setActive(vis[0].target.id);
+      },
+      { rootMargin: "-20% 0px -65% 0px", threshold: [0, 1] }
+    );
+    targets.forEach((el) => io.observe(el));
+  }
+
+  // Search / filter mock
+  const input = document.getElementById("toc-search");
+  const main = document.getElementById("doc-main");
+  const headings = [...main.querySelectorAll("h2[id], #quickstart")];
+
+  input.addEventListener("input", () => {
+    const q = input.value.trim().toLowerCase();
+    toc.querySelectorAll(".toc-group").forEach((g) => {
+      let any = false;
+      g.querySelectorAll("li").forEach((li) => {
+        const hit = !q || li.dataset.text.includes(q) ||
+          (document.getElementById(li.dataset.id)?.textContent || "").toLowerCase().includes(q);
+        li.classList.toggle("hidden", !hit);
+        if (hit) any = true;
+      });
+      g.classList.toggle("hidden", !any);
+    });
+    // Soft-dim body sections: hide h2 blocks whose title/id don't match when query present
+    headings.forEach((h) => {
+      const id = h.id;
+      const text = (h.textContent || "").toLowerCase() + " " + id;
+      const block = h.closest("section") || h;
+      // For h2, hide until next h2 by wrapping via class on h2 + following siblings until next h2 — keep simple: mark h2
+      const match = !q || text.includes(q) ||
+        [...toc.querySelectorAll('li[data-id="' + id + '"]')].some((li) => !li.classList.contains("hidden"));
+      h.classList.toggle("search-miss", q && !match);
+      h.style.opacity = q && !match ? "0.35" : "";
+    });
+  });
+})();
+</script>
+</body>
+</html>

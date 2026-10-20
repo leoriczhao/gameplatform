@@ -1,0 +1,75 @@
+name: gameplatform
+
+services:
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: gameplatform:latest
+    container_name: gameplatform-web
+    restart: unless-stopped
+    init: true
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+    ports:
+      # Only bound to localhost: cloudflared is the only public entrypoint.
+      # Host 8081 because snake-web already owns 127.0.0.1:8080.
+      - "127.0.0.1:8081:8080"
+    environment:
+      # v1.0-d: first admin bootstrapped from these at startup (empty = skip).
+      # Keep the real values in deploy/.env (mode 600).
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
+    volumes:
+      - gameplatform-scores:/data
+    networks:
+      - private
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request,sys;
+          sys.exit(0 if urllib.request.urlopen(
+          'http://127.0.0.1:8080/api/ready', timeout=3).status == 200 else 1)
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # Cloudflare named tunnel. Enable with: docker compose --profile tunnel up -d
+  # Requires ./.tunnel-token (see README).
+  cloudflared:
+    profiles:
+      - tunnel
+    image: cloudflare/cloudflared:latest
+    container_name: gameplatform-tunnel
+    # Run as the host user so it can read ./.tunnel-token (mode 600).
+    user: "${TUNNEL_UID:-1002}:${TUNNEL_GID:-1003}"
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    command:
+      - tunnel
+      - --no-autoupdate
+      - run
+      - --token-file
+      - /run/secrets/cloudflare-tunnel-token
+    volumes:
+      - ./.tunnel-token:/run/secrets/cloudflare-tunnel-token:ro
+    networks:
+      - private
+    depends_on:
+      web:
+        condition: service_healthy
+
+networks:
+  private:
+    name: gameplatform-private
+
+volumes:
+  gameplatform-scores:

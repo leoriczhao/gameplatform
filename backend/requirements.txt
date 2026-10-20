@@ -1,0 +1,19 @@
+fastapi==0.116.1
+uvicorn==0.35.0
+numpy==2.3.2
+PyJWT==2.10.1
+bcrypt==4.2.1
+httpx==0.28.1
+onnxruntime==1.20.1
+python-multipart==0.0.20
+pyyaml==6.0.2
+
+# OpenEnv 官方栈（docs/design/15 v2：接入完整的 openenv 环境）
+# 依赖解析注意：openenv 硬依赖 gradio>=4.0.0；gradio>=6.16 要求 starlette>=1.0，
+# 与本项目锁定的 fastapi==0.116.1 (starlette<0.48) 冲突，因此锁定 gradio 6.15.1
+# （2026-09 验证：gradio 6.15.1 + fastapi 0.116.1 + starlette 0.47.x 可共存导入）。
+openenv==0.4.1
+gradio==6.15.1
+gradio-client==2.5.0
+hf-gradio==0.4.1
+griffelib==2.3.0

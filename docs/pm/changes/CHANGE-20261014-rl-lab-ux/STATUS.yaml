@@ -1,0 +1,27 @@
+id: CHANGE-20261014-rl-lab-ux
+version: 1
+owner: stream-pm
+status: done
+gate: shipped
+assignee_next: none
+stage: ship
+stage_event: ship.done
+depends_on: []
+artifacts:
+  - docs/pm/changes/CHANGE-20261014-rl-lab-ux/specify.md
+  - docs/pm/changes/CHANGE-20261014-rl-lab-ux/ui/ui-handoff.md
+  - docs/pm/changes/CHANGE-20261014-rl-lab-ux/ui/export/01-lab-lobby-desktop.png
+  - docs/pm/changes/CHANGE-20261014-rl-lab-ux/ui/export/02-lab-models-desktop.png
+  - docs/pm/changes/CHANGE-20261014-rl-lab-ux/ui/export/02b-lab-models-eval-desktop.png
+  - docs/pm/changes/CHANGE-20261014-rl-lab-ux/ui/export/03-lab-ugpvp-desktop.png
+  - docs/pm/changes/CHANGE-20261014-rl-lab-ux/plan.md
+  - docs/pm/changes/CHANGE-20261014-rl-lab-ux/report-fe.md
+  - docs/pm/changes/CHANGE-20261014-rl-lab-ux/ship.md
+done_when:
+  - report-fe.md 覆盖 plan FE 任务且自测通过
+  - 无破坏性 API；D27 仍成立
+  - Ops 发版完成并回填 ship.md
+notes: |
+  leoric human-ship 2026-10-15；KR 运维已发 games.cree1p.com。
+  镜像 gameplatform:rl-lab-ux-20261015-1502 (a830d480f1e8)。
+  健康检查见 ship.md；/models 登录后工作台需人工点验。

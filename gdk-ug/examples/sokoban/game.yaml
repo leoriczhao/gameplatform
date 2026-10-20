@@ -1,0 +1,17 @@
+slug: sokoban
+title: 推箱子
+description: 把箱子推到目标格，步数越少分越高（迷你 6x4 关卡）
+version: 1.0.0
+board:
+  width: 6
+  height: 4
+  palette:
+    empty:  { glyph: "·", color: "#e4e4e7" }
+    wall:   { glyph: "🧱" }
+    target: { glyph: "🎯" }
+units:
+  worker: { glyph: "🙂" }
+  box:    { glyph: "📦" }
+# 沙箱渲染器示例（L3）：审核通过并由管理员开启后，前端用它逐帧自绘
+renderer:
+  entry: renderer.js

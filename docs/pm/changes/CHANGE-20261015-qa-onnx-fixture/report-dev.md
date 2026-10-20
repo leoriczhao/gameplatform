@@ -1,0 +1,29 @@
+# CHANGE-20261015-qa-onnx-fixture report-dev
+
+- commits / 变更摘要: 无 git 提交要求。新增最小 snake ONNX 夹具并更新 FIX-QA-02；未部署、未上传生产、未造测号。
+- 覆盖任务:
+  - [x] 生成 `docs/pm/qa/fixtures/snake-rotwin-min.onnx`（Gemm：`[1,1334]→[1,3]`，近零权）
+  - [x] ORT 会话 shape 校验 + 一次前向
+  - [x] `inference.check_contract(path, "snake")` → `game.snake`（stub 注册 snake 契约）
+  - [x] 更新 `docs/pm/qa/fixtures.md` FIX-QA-02 → 就绪
+  - [x] `docs/pm/qa/fixtures/README.md`
+  - [x] CHANGE 文档：STATUS / specify / plan / report-dev
+- 触及: docs only（夹具二进制 + QA 文档）；无业务代码变更
+- 开发自测: 通过
+  - 路径：`docs/pm/qa/fixtures/snake-rotwin-min.onnx`
+  - 大小：16196 bytes（~16 KB）
+  - ORT：`inputs=1` shape `(1,1334)`；`outputs=1` shape `(1,3)`；`run` OK，argmax=0
+  - `check_contract`：返回 `game.snake`（与 `packaged-games/snake/game.yaml` 一致）
+- OpenAPI / docs/api: 无变更
+- 契约偏差: 无（严格匹配 snake 声明契约）
+- 决策记录:
+  - 用 ONNX Gemm 零权（W[0,0]=0.01）最小图，避免依赖 torch；venv 临时装 `onnx` 生成，制品仅依赖仓内 `.onnx` + 现有 `onnxruntime`
+  - 文件只解 FIX-QA-02；H05 端到端仍等 FIX-QA-01
+- 变更文件:
+  - `docs/pm/qa/fixtures/snake-rotwin-min.onnx`
+  - `docs/pm/qa/fixtures/README.md`
+  - `docs/pm/qa/fixtures.md`
+  - `docs/pm/changes/CHANGE-20261015-qa-onnx-fixture/STATUS.yaml`
+  - `docs/pm/changes/CHANGE-20261015-qa-onnx-fixture/specify.md`
+  - `docs/pm/changes/CHANGE-20261015-qa-onnx-fixture/plan.md`
+  - `docs/pm/changes/CHANGE-20261015-qa-onnx-fixture/report-dev.md`

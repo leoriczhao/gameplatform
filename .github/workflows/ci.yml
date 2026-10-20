@@ -1,0 +1,113 @@
+# 持续集成：后端 pytest、前端 test/build、Docker 镜像构建 + 容器就绪冒烟。
+# push main / PR 自动跑；Release 工作流通过 workflow_call 复用同一套检查。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  backend:
+    name: Backend (pytest)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
+            sdk/pyproject.toml
+
+      - name: Install libseccomp2
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libseccomp2
+
+      # UGC 沙箱没有不安全回退：先确认 runner 内核满足 Landlock ABI >= 3，失败时报错更直观。
+      - name: Check Landlock ABI
+        run: |
+          python - <<'EOF'
+          import ctypes, sys
+          abi = ctypes.CDLL(None, use_errno=True).syscall(444, 0, 0, 1)
+          print(f"Landlock ABI: {abi}")
+          sys.exit(0 if abi >= 3 else 1)
+          EOF
+
+      # 先装 CPU 版 torch，后面的 requirements-dev 就不会再拉 CUDA 版。
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install 'torch>=2.6,<3' --index-url https://download.pytorch.org/whl/cpu
+          pip install -r backend/requirements.txt -r backend/requirements-dev.txt -e sdk
+
+      - name: pytest
+        env:
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+        run: python -m pytest -q -rs
+
+  web:
+    name: Web (test + build)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - run: npm ci --no-audit --no-fund
+      - run: npm test
+      - run: npm run build
+
+  docker:
+    name: Docker image (build + ready smoke)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: deploy/Dockerfile
+          tags: gameplatform:ci
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # 与 docker-compose.yml 相同的安全选项：非 root、只读 rootfs、no-new-privileges。
+      - name: Start container and wait for /api/ready
+        run: |
+          docker run -d --name gp-smoke --init --read-only --tmpfs /tmp \
+            --security-opt no-new-privileges:true -p 127.0.0.1:18080:8080 gameplatform:ci
+          for i in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:18080/api/ready; then echo; exit 0; fi
+            sleep 3
+          done
+          echo "container never became ready" >&2
+          docker logs gp-smoke
+          exit 1
+
+      - name: Container logs
+        if: always()
+        run: docker logs gp-smoke 2>&1 | tail -50 || true

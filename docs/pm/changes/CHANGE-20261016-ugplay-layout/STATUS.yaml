@@ -1,0 +1,28 @@
+id: CHANGE-20261016-ugplay-layout
+version: 1
+owner: stream-pm
+status: done
+gate: shipped
+user_ack:
+  by: leoric
+  at: "2026-10-16T18:25:00+08:00"
+  channel: group-gameplatform
+  quote: "ship-ack"
+assignee_next: null
+stage: done
+stage_event: qa.post-ship
+depends_on: []
+artifacts:
+  - docs/pm/changes/CHANGE-20261016-ugplay-layout/specify.md
+  - docs/pm/changes/CHANGE-20261016-ugplay-layout/ui/ui-handoff.md
+  - docs/pm/changes/CHANGE-20261016-ugplay-layout/plan.md
+  - docs/pm/changes/CHANGE-20261016-ugplay-layout/report-dev.md
+  - docs/pm/changes/CHANGE-20261016-ugplay-layout/report-qa.md
+  - docs/pm/changes/CHANGE-20261016-ugplay-layout/ship.md
+done_when:
+  - report-dev.md + report-qa.md
+  - ship + user_ack human-ship
+  - 发版后现网 QA 复测
+notes: |
+  现网收口：镜像 ugplay-layout-20261016-1827；QA post-ship PASS（handoff 1–7 + G01）。
+  回滚：ugplay-openenv-state-20261015-1720。

@@ -1,0 +1,19 @@
+id: CHANGE-20261015-qa-onnx-fixture
+version: 1
+owner: stream-pm
+status: done
+gate: none
+user_ack: null
+assignee_next: null
+stage: done
+stage_event: stage.ready
+depends_on: []
+artifacts:
+  - docs/pm/qa/fixtures/snake-rotwin-min.onnx
+  - docs/pm/qa/fixtures.md
+  - docs/pm/changes/CHANGE-20261015-qa-onnx-fixture/report-dev.md
+done_when:
+  - FIX-QA-02 文件就绪 + fixtures.md 更新
+  - report-dev.md
+notes: |
+  snake-rotwin-min.onnx 就绪。H05 完整绿仍缺 FIX-QA-01。无生产上传、无发版。

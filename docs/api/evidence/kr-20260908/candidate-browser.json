@@ -1,0 +1,60 @@
+{
+  "base_url": "http://127.0.0.1:18089",
+  "browser": "151.0.7922.34",
+  "account_registration": "passed",
+  "keyboard_gameplay": "passed",
+  "recorded_match": "/watch/match/1",
+  "replay_matches_original": true,
+  "replay_playback_and_seek": "passed",
+  "page_errors": [],
+  "versioned_replay_requests": [
+    {
+      "url": "http://127.0.0.1:18089/api/snake/env/info?version=1.0.1",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:18089/api/snake/env/new?version=1.0.1",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:18089/api/snake/env/step?version=1.0.1",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:18089/api/snake/env/step?version=1.0.1",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:18089/api/snake/env/step?version=1.0.1",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:18089/api/snake/env/step?version=1.0.1",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:18089/api/snake/env/step?version=1.0.1",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:18089/api/snake/env/step?version=1.0.1",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:18089/api/snake/env/step?version=1.0.1",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:18089/api/snake/env/step?version=1.0.1",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:18089/api/snake/env/step?version=1.0.1",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:18089/api/snake/env/step?version=1.0.1",
+      "status": 200
+    }
+  ]
+}

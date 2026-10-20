@@ -1,0 +1,223 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Stream design system — light minimal theme.
+ * White cards on a very light gray canvas, near-black ink, one restrained
+ * indigo accent (#4f46e5) for actions/active states only. No glows, no gradients.
+ */
+:root {
+  --radius: 0.625rem;
+
+  --background: oklch(0.985 0.002 247);   /* #fafafa */
+  --foreground: oklch(0.21 0.012 250);    /* #19191c ink */
+
+  --card: oklch(1 0 0);                   /* #ffffff */
+  --card-foreground: oklch(0.21 0.012 250);
+
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.21 0.012 250);
+
+  --primary: oklch(0.5 0.18 266);         /* indigo-600 #4f46e5 */
+  --primary-foreground: oklch(0.99 0.005 266);
+
+  --secondary: oklch(0.96 0.003 247);     /* gray-100 */
+  --secondary-foreground: oklch(0.32 0.01 250);
+
+  --muted: oklch(0.965 0.003 247);
+  --muted-foreground: oklch(0.54 0.012 250);
+
+  --accent: oklch(0.94 0.012 266);        /* indigo-tinted hover */
+  --accent-foreground: oklch(0.38 0.09 266);
+
+  --destructive: oklch(0.55 0.2 27);      /* red-600 */
+  --destructive-foreground: oklch(0.99 0.005 27);
+
+  --border: oklch(0.92 0.004 247);        /* zinc-200 #e4e4e7 */
+  --input: oklch(0.92 0.004 247);
+  --ring: oklch(0.5 0.18 266);
+
+  --success: oklch(0.62 0.16 155);        /* emerald-600 */
+  --warning: oklch(0.66 0.14 80);         /* amber-600 */
+  --info: oklch(0.59 0.12 232);           /* sky-600 */
+
+  --chart-1: oklch(0.5 0.18 266);
+  --chart-2: oklch(0.62 0.16 155);
+  --chart-3: oklch(0.66 0.14 80);
+  --chart-4: oklch(0.55 0.2 27);
+  --chart-5: oklch(0.59 0.12 232);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --font-sans: -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei", sans-serif;
+
+  --animate-fade-in: fade-in 0.25s ease-out;
+
+  @keyframes fade-in {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/40;
+  }
+  html {
+    color-scheme: light;
+  }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+  }
+  ::selection {
+    @apply bg-primary/15;
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply rounded-full border-2 border-solid border-transparent bg-neutral-300 bg-clip-padding;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-neutral-400;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+/* ---------- app chrome ---------- */
+
+/* light canvas with a whisper of indigo at the top edge */
+.app-bg {
+  min-height: 100vh;
+  background:
+    radial-gradient(900px 320px at 50% -12%, oklch(0.5 0.18 266 / 0.05), transparent 65%),
+    var(--background);
+}
+
+.page-shell {
+  @apply mx-auto w-full max-w-6xl px-3 pb-12 pt-4 sm:px-5;
+}
+
+/* minimal "gradient" title is now plain ink; class kept for markup compatibility */
+.gradient-text {
+  color: var(--foreground);
+}
+
+/* canvas / board container */
+.board-shell {
+  @apply rounded-xl border border-border bg-card p-2 shadow-sm;
+}
+.board-shell canvas {
+  @apply rounded-lg;
+  max-width: 100%;
+  height: auto;
+}
+
+/* subtle lift on hover for interactive cards */
+.hover-lift {
+  @apply transition-all duration-200;
+}
+.hover-lift:hover {
+  @apply -translate-y-0.5 border-neutral-300 shadow-md;
+}
+
+/* UgPlay layout — CHANGE-20261016-ugplay-layout */
+.ug-play-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 1.25rem;
+  align-items: start;
+}
+.ug-board-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.85rem;
+  min-width: 0;
+}
+.ug-board-frame {
+  width: 100%;
+  max-width: 100%;
+  max-height: min(70vh, 640px);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
+  padding: 0.75rem;
+}
+.ug-board-scaler-host {
+  overflow: hidden;
+  line-height: 0;
+}
+.ug-board-scaler {
+  display: inline-block;
+  transform-origin: top left;
+}
+.ug-side-col {
+  position: sticky;
+  top: 3.75rem; /* AppShell header h-12 + gap */
+  max-height: calc(100vh - 4.5rem);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  width: 300px;
+  max-width: 100%;
+}
+.ug-login-gate {
+  width: 100%;
+  max-width: 420px;
+}
+@media (max-width: 800px) {
+  .ug-play-grid {
+    grid-template-columns: 1fr;
+  }
+  .ug-side-col {
+    position: static;
+    max-height: none;
+    width: 100%;
+  }
+}

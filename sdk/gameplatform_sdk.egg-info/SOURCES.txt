@@ -1,0 +1,15 @@
+README.md
+pyproject.toml
+gameplatform/__init__.py
+gameplatform/client.py
+gameplatform/export.py
+gameplatform/gym.py
+gameplatform/microrts_obs.py
+gameplatform/remote.py
+gameplatform/games/__init__.py
+gameplatform/games/snake_features.py
+gameplatform_sdk.egg-info/PKG-INFO
+gameplatform_sdk.egg-info/SOURCES.txt
+gameplatform_sdk.egg-info/dependency_links.txt
+gameplatform_sdk.egg-info/requires.txt
+gameplatform_sdk.egg-info/top_level.txt

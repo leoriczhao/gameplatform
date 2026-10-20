@@ -1,0 +1,4 @@
+numpy
+requests
+gymnasium>=1.1
+openenv==0.4.1

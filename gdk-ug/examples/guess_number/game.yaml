@@ -1,0 +1,13 @@
+slug: guess-number
+title: 猜数字
+description: 20 次内猜中 0-99，每次提示大小，猜得越少分越高
+version: 1.0.0
+board:
+  width: 10
+  height: 10
+  palette:
+    empty: { glyph: "·", color: "#e4e4e7" }
+    low:   { glyph: "🔽" }
+    high:  { glyph: "🔼" }
+    hit:   { glyph: "🎯" }
+ai_strategies: ["binary"]

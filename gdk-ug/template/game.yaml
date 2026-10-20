@@ -1,0 +1,59 @@
+# GDK-UG 游戏包元数据（docs/design/10 §4 / 16）——按需修改并保持字段名不变
+slug: my-game            # 全局唯一，小写字母/数字/连字符；创建后不可改
+title: 我的游戏
+description: 一句话介绍你的游戏
+version: 0.1.0          # x.y.z
+
+# 渲染声明（通用棋盘渲染器 v2）：state.board 中的单元格 id 必须都在 palette 里
+board:
+  schema: 2
+  width: 8
+  height: 8
+  # 可选：格子几何与棋盘背景（cell/background 不写则沿用 v1 视觉）
+  cell: { size: 32, gap: 1, radius: 4, shape: square }
+  background: { kind: checker, colors: ["#f8fafc", "#f1f5f9"] }
+  palette:
+    empty: { glyph: "·", color: "#e4e4e7" }
+    wall:  { glyph: "🧱" }
+    # 每个条目还可选：sprite（资源名）/ vector（{path,color}）/
+    #   glyph_color / scale / opacity / shadow / z /
+    #   orient（{field, angles} 按 state 字段旋转）/ anim（常驻动效）/ enter（入场动效）
+  # 可选：HUD 与事件（读 state 字段路径；events 配合 state.events）
+  # hud:
+  #   - { kind: stat, label: 分数, path: score }
+  #   - { kind: bar, label: 能量, path: energy, max: 100 }
+  #   - { kind: miniboard, label: NEXT, path: next_board, width: 4, height: 4 }
+  # events:
+  #   - { name: eat, effect: { kind: flash, color: "#22c55e", ms: 260 }, sound: eat }
+
+# 可选：state.units 的单位类型 → 显示（支持朝向/归属色/血条/标签）
+units:
+  player: { glyph: "🙂" }
+  # enemy: { glyph: "👾", owner_colors: ["#2563eb", "#dc2626"],
+  #          hp: { field: hp, max_field: hp_max }, label: { field: tag } }
+
+# 可选：资源包（PNG/WebP ≤256KB、单边 ≤512px、≤32 个；OGG/MP3/WAV ≤512KB、≤16 个）
+# assets:
+#   head: { file: "assets/head.png", w: 24, h: 24 }
+# sounds:
+#   eat: { file: "assets/eat.ogg", ms: 400, volume: 0.6 }
+
+# 可选：沙箱自定义渲染器（L3，默认关闭；UGC 需管理员审核后开启，见 docs/design/16 §5）
+# renderer:
+#   entry: renderer.js     # 必须定义 globalThis.Renderer = { init(api), frame(state,t,dt) }
+
+# 可选：ONNX 模型托管契约（声明后玩家可上传模型打这个游戏）
+# contract:
+#   in_shape: [1, 64]
+#   out_shape: [1, 4]
+
+# 可选：内置 AI 策略名列表（get_adapter() 需实现 opponent_action）
+# ai_strategies: ["greedy"]
+
+# 可选：PvP（声明后开放 房间/快速匹配/ELO）
+#   action: unit   = 棋盘复合指令 [[unit_id, cmd, dir?, type?], …]
+#   action: choice = 双方各选一个选项（choices 按钮组，动作是索引 0..N-1）
+# pvp:
+#   enabled: true
+#   action: choice
+#   choices: ["选项A", "选项B"]

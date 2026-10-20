@@ -1,0 +1,26 @@
+id: CHANGE-20261014-docs-cleanup
+version: 1
+owner: stream-pm
+status: done
+gate: none
+stage: specify
+depends_on: []
+artifacts:
+  - docs/pm/changes/CHANGE-20261014-docs-cleanup/scan.md
+  - docs/pm/changes/CHANGE-20261014-docs-cleanup/STATUS.yaml
+  - README.md
+  - docs/design/00-README.md
+  - docs/design/00-平台蓝图与路线图.md
+  - docs/design/06-匹配机制与房间系统.md
+  - docs/design/10-用户上传游戏设计.md
+  - docs/design/11-用户上传游戏实施计划.md
+  - docs/design/12-游戏完全解耦重构设计.md
+  - docs/design/13-游戏完全解耦实施计划.md
+  - docs/architecture.html
+  - docs/pm/00-README.md
+done_when:
+  - scan.md §4 就地修订完成（方案 A）
+  - 未 mv/rm/建 archive；未改业务代码与 web/DESIGN.md
+assignee_next: stream-pm
+notes: |
+  用户勾选方案 A：只修订 §4。产品真相：docs/pm/01–04；技术历史：docs/design/。
