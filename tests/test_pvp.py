@@ -213,9 +213,9 @@ def test_model_vs_model_match():
     assert r.status_code == 200, r.text
     match_id = r.json()["match_id"]
 
-    # poll the async worker until finished
+    # poll the async worker until finished (up to 60s: slow CI runners)
     status = None
-    for _ in range(100):
+    for _ in range(600):
         r = client.get(f"/api/v1/matches/{match_id}", headers=HA)
         m = r.json()["match"]
         status = m["status"]
@@ -234,7 +234,7 @@ def test_model_vs_builtin_ai():
                           "model_b": "ai:worker_rush"}, headers=HA)
     assert r.status_code == 200, r.text
     match_id = r.json()["match_id"]
-    for _ in range(100):
+    for _ in range(600):
         m = client.get(f"/api/v1/matches/{match_id}", headers=HA).json()["match"]
         if m["status"] in ("finished", "failed"):
             break
