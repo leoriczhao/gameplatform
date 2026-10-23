@@ -45,9 +45,9 @@ backend/            FastAPI 平台服务
   ugc*.py / registry.py            游戏库：包校验/静态扫描/沙箱 runner/代理注册（13 G3 起平台零游戏代码）
 packaged-games/      官方种子游戏包（snake/tetris/microrts：game.yaml + __init__.py + 资源，
                     与用户上传走同一条沙箱管线，启动自动播种，作者显示「官方」）
-web/                React 18 + Vite + shadcn/ui + Tailwind + sonner + lucide（亮色极简，见 DESIGN.md）
-  src/pages/        大厅/UgPlay+UgPvp（通用游戏页）/Records（战绩）/资料/好友/通知/观战回放/管理后台+UgUpload
-  src/components/   AppShell（全局顶栏+通知铃铛）、LoginProvider、UgBoard（通用棋盘门面）、LevelBadge、ui/*
+web/                React 18 + Vite + Tailwind + lucide：Lab UI（深/亮双主题，src/lab/）
+  src/lab/          tokens.css / LabShell（导航+命令面板+主题）/ 全部页面（总览、环境、模型、对局、试玩、PvP、观战回放、资料、好友、通知、管理、UGC）
+  src/components/   UgBoard（通用棋盘门面）
   src/render/       渲染 v2：schema 归一化/动效/资源/Canvas/DOM/HUD/沙箱宿主（docs/design/16）
 static-docs/       静态文档：api.html 接口文档 + vendor/（自托管 Swagger/ReDoc）
 sdk/                Python SDK（训练 + 全量 API 客户端）

@@ -1,0 +1,323 @@
+{
+  "steps": [
+    {
+      "case": "U01",
+      "step": "guest games",
+      "ok": true,
+      "detail": "status=200 games=['microrts', 'snake', 'tetris']"
+    },
+    {
+      "case": "U01",
+      "step": "guest openenv list",
+      "ok": true,
+      "detail": "[\"microrts\",\"snake\",\"tetris\"]"
+    },
+    {
+      "case": "U03",
+      "step": "guest watch public session",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "case": "U03",
+      "step": "guest replay",
+      "ok": true,
+      "detail": "match=1 status=200 moves=0"
+    },
+    {
+      "case": "U04",
+      "step": "guest token /auth/me",
+      "ok": false,
+      "detail": ""
+    },
+    {
+      "case": "U04",
+      "step": "invalid token -> 401",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "case": "U04",
+      "step": "guest upload model -> 401",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "case": "U04",
+      "step": "verifyuser login",
+      "ok": true,
+      "detail": "verifyuser"
+    },
+    {
+      "case": "U05",
+      "step": "get profile",
+      "ok": true,
+      "detail": "{\"profile\":{\"id\":5,\"username\":\"verifyuser\",\"nickname\":\"verifyuser\",\"avatar\":\"\",\"signature\":\"\",\"role\":\"user\",\"status\":\"ac"
+    },
+    {
+      "case": "U05",
+      "step": "invalid nickname 25 chars -> 400",
+      "ok": false,
+      "detail": "{\"profile\":{\"id\":5,\"username\":\"verifyuser\",\"nickname\":\"xxxxxxxxxxxxxxxxxxxxxxxx\",\"avatar\":\"\",\"signature\":\"\",\"role\":\"user"
+    },
+    {
+      "case": "U05",
+      "step": "valid profile update",
+      "ok": true,
+      "detail": "{\"profile\":{\"id\":5,\"username\":\"verifyuser\",\"nickname\":\"验证用户\",\"avatar\":\"😊\",\"signature\":\"loop verify\",\"role\":\"user\",\"statu"
+    },
+    {
+      "case": "U05",
+      "step": "profile persisted",
+      "ok": false,
+      "detail": "None"
+    },
+    {
+      "case": "U07",
+      "step": "valid ONNX upload",
+      "ok": true,
+      "detail": "id=1 status=200"
+    },
+    {
+      "case": "U07",
+      "step": "wrong-game contract rejected",
+      "ok": true,
+      "detail": "{\"detail\":\"输入 shape 不匹配：期望 (1, 2, 20, 10)（game.tetris），实际 (1, 1334)\"}"
+    },
+    {
+      "case": "U10",
+      "step": "model list contains A",
+      "ok": true,
+      "detail": "2 models"
+    },
+    {
+      "case": "U10",
+      "step": "model detail",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "case": "U10",
+      "step": "delete model",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "case": "U10",
+      "step": "deleted model 404",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "case": "U10",
+      "step": "list excludes deleted",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "case": "U24",
+      "step": "admin ban model",
+      "ok": true,
+      "detail": "{\"updated\":true}"
+    },
+    {
+      "case": "U24",
+      "step": "banned model hidden",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "case": "U24",
+      "step": "admin restore model",
+      "ok": true,
+      "detail": "{\"updated\":true}"
+    },
+    {
+      "case": "U24",
+      "step": "cleanup model",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "case": "U12",
+      "step": "AI action for demo",
+      "ok": true,
+      "detail": "status=200 action=2"
+    },
+    {
+      "case": "U14",
+      "step": "two users matched",
+      "ok": true,
+      "detail": "q1={'queued': True, 'matched': False, 'mode': 'ranked', 'position': 1, 'wait_seconds': 0, 'session_id': None} q2={'queued': False, 'matched': True, 'mode': 'ranked', 'position': None, 'wait_seconds': 0, 'session_id': '74ef0da8d303'} mm={'queued': False, 'matched': True, 'mode': 'ranked', 'position': None, 'wait_seconds': 0, 'session_id': '74ef0da8d303'}"
+    },
+    {
+      "case": "U14",
+      "step": "matched session active",
+      "ok": true,
+      "detail": "active"
+    },
+    {
+      "case": "U16",
+      "step": "leaderboard total",
+      "ok": false,
+      "detail": "items=0"
+    },
+    {
+      "case": "U16",
+      "step": "leaderboard weekly",
+      "ok": false,
+      "detail": "items=0"
+    },
+    {
+      "case": "U16",
+      "step": "ratings",
+      "ok": true,
+      "detail": "{\"items\":[{\"user_id\":4,\"rating\":1230.5,\"games\":2,\"wins\":2,\"name\":\"loopuser2\"},{\"user_id\":3,\"rating\":1169.5,\"games\":2,\"wins\":0,\"name\":\"loopus"
+    },
+    {
+      "case": "U21",
+      "step": "upload draft game",
+      "ok": false,
+      "detail": "status=400 gid=None body={\"detail\":\"不允许的文件类型：__pycache__/__init__.cpython-312.pyc（仅 .py/.json/.yaml/.txt/.md/.npz/.npy/.bin）\"}"
+    },
+    {
+      "case": "U23",
+      "step": "ban user",
+      "ok": true,
+      "detail": "{\"updated\":true}"
+    },
+    {
+      "case": "U23",
+      "step": "banned user cannot login",
+      "ok": true,
+      "detail": "status=401"
+    },
+    {
+      "case": "U23",
+      "step": "unban -> login ok",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "case": "U25",
+      "step": "create report",
+      "ok": true,
+      "detail": "{\"report\":{\"id\":1,\"target_type\":\"user\",\"target_id\":4,\"reason\":\"loopback verify\",\"status\":\"open\",\"created_at\":1792741014.0786114}}"
+    },
+    {
+      "case": "U25",
+      "step": "admin open reports",
+      "ok": true,
+      "detail": "open=[1]"
+    },
+    {
+      "case": "U25",
+      "step": "resolve report",
+      "ok": true,
+      "detail": "{\"updated\":true}"
+    },
+    {
+      "case": "U25",
+      "step": "resolved visible",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "case": "U26",
+      "step": "dashboard",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "case": "U26",
+      "step": "admin list /api/v1/admin/models",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "case": "U26",
+      "step": "admin list /api/v1/admin/matches",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "case": "U26",
+      "step": "admin list /api/v1/admin/ugc",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "case": "U29",
+      "step": "add friend",
+      "ok": true,
+      "detail": "{\"friend\":{\"id\":4,\"username\":\"loopuser2\",\"nickname\":\"loopuser2\",\"avatar\":\"\",\"signature\":\"\",\"role\":\"user\",\"status\":\"active\",\"created_at\":1792"
+    },
+    {
+      "case": "U28",
+      "step": "friend notification delivered",
+      "ok": true,
+      "detail": "items=1"
+    },
+    {
+      "case": "U28",
+      "step": "unread count > 0",
+      "ok": true,
+      "detail": "unread=1"
+    },
+    {
+      "case": "U28",
+      "step": "mark all read",
+      "ok": true,
+      "detail": "{\"unread\":0}"
+    },
+    {
+      "case": "U28",
+      "step": "unread cleared",
+      "ok": true,
+      "detail": "{\"unread\":0}"
+    },
+    {
+      "case": "U29",
+      "step": "friends list contains",
+      "ok": true,
+      "detail": "['loopuser2']"
+    },
+    {
+      "case": "U29",
+      "step": "remove friend",
+      "ok": true,
+      "detail": "{\"removed\":true}"
+    },
+    {
+      "case": "U29",
+      "step": "friend removed from list",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "case": "U30",
+      "step": "unauth models 401",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "case": "U30",
+      "step": "non-admin 403",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "case": "U30",
+      "step": "unknown game 404",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "case": "U30",
+      "step": "invalid action 400",
+      "ok": true,
+      "detail": "status=400"
+    }
+  ],
+  "done": true
+}

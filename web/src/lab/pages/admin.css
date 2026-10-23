@@ -1,0 +1,317 @@
+/* 管理后台 · Lab UI 页面级样式（仅 .adm-* 作用域，颜色全部走 lab token） */
+
+.adm-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.adm-panel__body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.adm-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.adm-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--lab-line);
+  border-radius: 8px;
+  background: var(--lab-surface-2);
+}
+
+.adm-stat__label {
+  font-family: var(--lab-font-mono);
+  font-size: 7.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--lab-text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.adm-stat__value {
+  font-family: var(--lab-font-display);
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -0.5px;
+  line-height: 1;
+  color: var(--lab-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.adm-composer {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.adm-composer .lab-input {
+  flex: 1 1 auto;
+  min-width: 200px;
+}
+
+.adm-form-error {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--lab-red);
+}
+
+.adm-muted {
+  font-size: 10.5px;
+  color: var(--lab-text-3);
+}
+
+.adm-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.adm-kicker {
+  font-family: var(--lab-font-mono);
+  font-size: 8px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--lab-text-3);
+}
+
+.adm-ugc-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ----------------------------------------------------------------- tables */
+.adm-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--lab-line);
+  border-radius: 8px;
+}
+
+.adm-table {
+  width: 100%;
+  min-width: 640px;
+  border-collapse: collapse;
+  font-size: 11.5px;
+}
+
+.adm-table th {
+  padding: 9px 11px;
+  text-align: left;
+  white-space: nowrap;
+  font-family: var(--lab-font-mono);
+  font-size: 7.5px;
+  font-weight: 500;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--lab-text-3);
+  background: var(--lab-surface-2);
+  border-bottom: 1px solid var(--lab-line-2);
+}
+
+.adm-table td {
+  padding: 9px 11px;
+  color: var(--lab-text-2);
+  vertical-align: middle;
+  border-bottom: 1px solid var(--lab-line);
+}
+
+.adm-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.adm-table tbody tr {
+  transition: background 160ms ease;
+}
+
+.adm-table tbody tr:hover {
+  background: var(--lab-hover);
+}
+
+.adm-table th.is-right,
+.adm-table td.is-right {
+  text-align: right;
+}
+
+.adm-table td b {
+  color: var(--lab-text);
+  font-weight: 600;
+}
+
+.adm-table .adm-cell-mono {
+  font-family: var(--lab-font-mono);
+  font-size: 9.5px;
+  color: var(--lab-text-3);
+  white-space: nowrap;
+}
+
+/* ----------------------------------------------------------------- pager */
+.adm-pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-top: 2px;
+}
+
+.adm-pager__meta {
+  font-size: 10.5px;
+  color: var(--lab-text-3);
+}
+
+.adm-pager__btns {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.adm-pager__btn {
+  min-width: 26px;
+  height: 26px;
+  padding: 0 7px;
+  border-radius: 6px;
+  border: 1px solid var(--lab-line);
+  background: transparent;
+  color: var(--lab-text-3);
+  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 160ms ease, color 160ms ease, border-color 160ms ease;
+}
+
+.adm-pager__btn:hover:not(:disabled) {
+  background: var(--lab-hover);
+  color: var(--lab-text);
+}
+
+.adm-pager__btn.is-active {
+  background: var(--lab-lime);
+  border-color: var(--lab-lime);
+  color: var(--lab-lime-ink);
+  font-weight: 600;
+}
+
+.adm-pager__btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.adm-pager__gap {
+  padding: 0 2px;
+  font-size: 11px;
+  color: var(--lab-text-3);
+}
+
+/* ------------------------------------------------------- renderer preview */
+.adm-modal-desc {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.65;
+}
+
+.adm-renderer {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  max-height: 62vh;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.adm-thumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.adm-thumb {
+  width: 44px;
+  height: 44px;
+  padding: 2px;
+  object-fit: contain;
+  border: 1px solid var(--lab-line-2);
+  border-radius: 5px;
+  background: var(--lab-surface-2);
+}
+
+.adm-thumb-fallback {
+  font-size: 10px;
+  color: var(--lab-text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.adm-code {
+  margin: 0;
+  max-height: 288px;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid var(--lab-line);
+  border-radius: 8px;
+  background: var(--lab-code-bg);
+  color: var(--lab-text-2);
+  font-family: var(--lab-font-mono);
+  font-size: 10.5px;
+  line-height: 1.6;
+  white-space: pre;
+}
+
+/* -------------------------------------------------------------- responsive */
+@media (max-width: 900px) {
+  .adm-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .adm-composer {
+    flex-wrap: wrap;
+  }
+
+  .adm-composer .lab-input {
+    min-width: 100%;
+  }
+
+  .adm-table {
+    min-width: 560px;
+  }
+}
+
+@media (max-width: 720px) {
+  .adm-stats {
+    gap: 10px;
+  }
+
+  .adm-stat {
+    padding: 10px 12px;
+  }
+
+  .adm-stat__value {
+    font-size: 20px;
+  }
+
+  .adm-pager {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .adm-table th,
+  .adm-table td {
+    padding: 8px 9px;
+  }
+}

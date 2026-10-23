@@ -1,0 +1,219 @@
+/* 单机 / 试玩页 /games/:slug */
+.play-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 18px;
+  align-items: start;
+}
+.play-main {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+.play-board-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 10px;
+  border: 1px solid var(--lab-line);
+  background: var(--lab-surface);
+  min-height: 420px;
+}
+.play-board-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.play-board-frame {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  flex: 1 1 auto;
+  min-height: 300px;
+  padding: 14px;
+  border-radius: 8px;
+  border: 1px solid var(--lab-line);
+  background: var(--lab-code-bg);
+  overflow: hidden;
+}
+.play-board-host {
+  position: relative;
+  overflow: hidden;
+}
+.play-board-inner {
+  transform-origin: top left;
+}
+.play-board-note {
+  font-family: var(--lab-font-mono);
+  font-size: 8px;
+  letter-spacing: 0.04em;
+  color: var(--lab-text-3);
+}
+.play-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: 10px;
+  border: 1px solid var(--lab-line);
+  background: var(--lab-surface);
+}
+.play-controls-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.play-choice {
+  min-width: 86px;
+  height: 40px;
+  padding: 0 14px;
+  border-radius: 7px;
+  border: 1px solid var(--lab-line-2);
+  background: transparent;
+  color: var(--lab-text-2);
+  font-size: 12.5px;
+  font-weight: 500;
+  transition: background 160ms ease, color 160ms ease, border-color 160ms ease;
+}
+.play-choice:hover:not(:disabled) {
+  color: var(--lab-text);
+  background: var(--lab-hover);
+  border-color: var(--lab-text-3);
+}
+.play-choice:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.play-action-input {
+  width: 150px;
+  height: 40px;
+  border-radius: 7px;
+  border: 1px solid var(--lab-line-2);
+  background: var(--lab-bg);
+  color: var(--lab-text);
+  padding: 0 11px;
+  font-family: var(--lab-font-mono);
+  font-size: 12px;
+}
+.play-status-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 11px;
+  color: var(--lab-text-3);
+}
+.play-side {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+.play-score {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.play-score__num {
+  font-family: var(--lab-font-display);
+  font-size: 34px;
+  font-weight: 600;
+  letter-spacing: -1px;
+  color: var(--lab-lime-text);
+}
+.play-score__cap {
+  font-size: 10.5px;
+  color: var(--lab-text-3);
+}
+.play-kv {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 10.5px;
+  color: var(--lab-text-3);
+}
+.play-kv b {
+  font-family: var(--lab-font-mono);
+  font-size: 9px;
+  font-weight: 500;
+  color: var(--lab-text-2);
+}
+.play-lb-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 10.5px;
+  color: var(--lab-text-2);
+}
+.play-lb-rank {
+  width: 26px;
+  font-family: var(--lab-font-mono);
+  font-size: 8.5px;
+  color: var(--lab-text-3);
+}
+.play-lb-rank.is-top {
+  color: var(--lab-lime-text);
+}
+.play-lb-name {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.play-lb-score {
+  font-family: var(--lab-font-mono);
+  font-size: 9px;
+  color: var(--lab-text);
+}
+.play-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.play-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 7px;
+  border-radius: 4px;
+  border: 1px solid var(--lab-line);
+  font-family: var(--lab-font-mono);
+  font-size: 8px;
+  color: var(--lab-text-3);
+}
+.play-key b {
+  font-weight: 600;
+  color: var(--lab-text-2);
+}
+.play-gate {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  border-radius: 10px;
+  border: 1px solid var(--lab-line);
+  background: var(--lab-surface);
+  align-items: flex-start;
+}
+@media (max-width: 1180px) {
+  .play-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .play-side {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
+}
+@media (max-width: 720px) {
+  .play-side {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

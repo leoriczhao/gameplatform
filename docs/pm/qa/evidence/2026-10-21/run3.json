@@ -1,0 +1,32 @@
+{
+  "replay_1": {
+    "status": 200,
+    "moves": 0,
+    "keys": [
+      "replay"
+    ]
+  },
+  "replay_2": {
+    "status": 200,
+    "moves": 0,
+    "keys": [
+      "replay"
+    ]
+  },
+  "replay_3": {
+    "status": 200,
+    "moves": 0,
+    "keys": [
+      "replay"
+    ]
+  },
+  "watch_create": {
+    "status": 200,
+    "sid": "45dd89e21e85",
+    "invite": "L3J0NS"
+  },
+  "watch_anon_get": {
+    "status": 200,
+    "body": "{\"session\":{\"id\":\"45dd89e21e85\",\"game\":\"microrts\",\"kind\":\"pvp\",\"status\":\"waiting\",\"tick\":0,\"state\":{\"grid\":[16,16],\"terrain\":[[0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,2"
+  }
+}

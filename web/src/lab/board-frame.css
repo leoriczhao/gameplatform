@@ -1,0 +1,20 @@
+.lab-board-frame {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  flex: 1 1 auto;
+  min-height: 300px;
+  padding: 14px;
+  border-radius: 8px;
+  border: 1px solid var(--lab-line);
+  background: var(--lab-code-bg);
+  overflow: hidden;
+}
+.lab-board-host {
+  position: relative;
+  overflow: hidden;
+}
+.lab-board-inner {
+  transform-origin: top left;
+}

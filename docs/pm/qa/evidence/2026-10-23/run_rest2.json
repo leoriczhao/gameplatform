@@ -1,0 +1,76 @@
+{
+  "steps": [
+    {
+      "case": "U04",
+      "step": "guest /me -> 401 by design",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "case": "U04",
+      "step": "guest can read scores",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "case": "U04",
+      "step": "guest cannot create play session -> 401",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "case": "U05",
+      "step": "overlong nickname handled (truncated to 24)",
+      "ok": true,
+      "detail": "status=200 len=24"
+    },
+    {
+      "case": "U05",
+      "step": "valid update persisted",
+      "ok": true,
+      "detail": "profile_keys=['id', 'username', 'nickname', 'avatar', 'signature', 'role']"
+    },
+    {
+      "case": "U16",
+      "step": "leaderboard total",
+      "ok": true,
+      "detail": "status=200 items=2 sample=[{'user_id': 4, 'rating': 1230.5, 'games': 2, 'wins': 2, 'name': 'loopuser2'}, {'user_id': 3, 'rating': 1169.5, 'games': 2, 'wins': 0, 'name': 'loopuser'}]"
+    },
+    {
+      "case": "U16",
+      "step": "leaderboard weekly",
+      "ok": true,
+      "detail": "status=200 items=2 sample=[{'user_id': 4, 'name': 'loopuser2', 'games': 2, 'wins': 2, 'xp': 50}, {'user_id': 3, 'name': 'loopuser', 'games': 2, 'wins': 0, 'xp': 20}]"
+    },
+    {
+      "case": "U21",
+      "step": "upload draft game (clean zip)",
+      "ok": true,
+      "detail": "status=200 gid=4 body={\"game\":{\"id\":4,\"owner_id\":5,\"slug\":\"sokoban\",\"title\":\"推箱子\",\"description\":\"把箱子推到目标格，步数越少分越高（迷你 6x4 关卡）\",\"status\":\"draft\",\"pause_reason\":null,\"created_at\":1792741042.30385,\"updated_"
+    },
+    {
+      "case": "U21",
+      "step": "submit review",
+      "ok": true,
+      "detail": "{\"game\":{\"id\":4,\"owner_id\":5,\"slug\":\"sokoban\",\"title\":\"推箱子\",\"description\":\"把箱子推到目标格，步数越少分越高（迷你 6x4 关卡）\",\"status\":\"pending\",\"pause_reason\":nu"
+    },
+    {
+      "case": "U21",
+      "step": "admin pending queue",
+      "ok": true,
+      "detail": "statuses=[(4, 'pending')]"
+    },
+    {
+      "case": "U21",
+      "step": "approve publish",
+      "ok": true,
+      "detail": "{\"game\":{\"id\":4,\"owner_id\":5,\"slug\":\"sokoban\",\"title\":\"推箱子\",\"description\":\"把箱子推到目标格，步数越少分越高（迷你 6x4 关卡）\",\"status\":\"published\",\"pause_reason\":"
+    },
+    {
+      "case": "U21",
+      "step": "published game in catalog",
+      "ok": true,
+      "detail": "slug=sokoban catalog=['microrts', 'snake', 'sokoban', 'tetris']"
+    }
+  ]
+}

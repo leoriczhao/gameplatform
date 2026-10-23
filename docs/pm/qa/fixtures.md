@@ -26,6 +26,18 @@
 | 现网模型 | `qa-smoke-snake-1015`（#4，契约 game.snake，评估通过·0；2026-10-15 H05） |
 | 解锁用例 | H05、D04、D05（文件步）；完整绿仍依赖 FIX-QA-01 |
 
+## FIX-QA-04 · 模型挑战样例 ONNX（microrts）
+
+| 字段 | 值 |
+|---|---|
+| 状态 | **就绪**（2026-10-21 新增，最小合规夹具） |
+| 路径/资产 | `docs/pm/qa/fixtures/microrts-rush-min.onnx`（~870 KB） |
+| 游戏 | `microrts`（契约：`in [1,1546]` / `out [1,140]` / composite） |
+| 校验 | 上传 API 返回 `io_contract: game.microrts`（2026-10-21） |
+| 用途 | 解锁 U06 模型挑战闭环：上传 → 评估（vs 默认对手）→ 挑战 `ai:worker_rush` → 回放 |
+| 限制 | 权重近零，仅用于链路/契约冒烟，不代表可玩策略；评估胜率约 0 |
+| 验证记录 | `docs/pm/qa/2026-10-21-loop-walk.md`（第二轮） |
+
 ## FIX-QA-03 · `pvp_enabled` 公开游戏
 
 | 字段 | 值 |
