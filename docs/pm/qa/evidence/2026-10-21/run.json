@@ -1,0 +1,169 @@
+{
+  "api": "http://127.0.0.1:8080",
+  "started": 1792553633.7013803,
+  "steps": [
+    {
+      "usecase": "setup",
+      "step": "users",
+      "ok": true,
+      "detail": "loopuser / loopuser2 logged in"
+    },
+    {
+      "usecase": "U06",
+      "step": "1 API ready",
+      "ok": true,
+      "detail": "{\"status\":\"ready\",\"games\":[\"microrts\",\"snake\",\"tetris\"]}"
+    },
+    {
+      "usecase": "U06",
+      "step": "1 games",
+      "ok": true,
+      "detail": "['microrts', 'snake', 'tetris']"
+    },
+    {
+      "usecase": "U06",
+      "step": "2 openenv list",
+      "ok": true,
+      "detail": "[\"microrts\",\"snake\",\"tetris\"]"
+    },
+    {
+      "usecase": "U06",
+      "step": "3 upload fixture ONNX",
+      "ok": true,
+      "detail": "status=200 model={\"id\": 1, \"name\": \"loop-snake-min\", \"game\": \"snake\", \"io_contract\": \"game.snake\", \"status\": \"active\"}"
+    },
+    {
+      "usecase": "U06",
+      "step": "3 model listed",
+      "ok": true,
+      "detail": "1 models"
+    },
+    {
+      "usecase": "U06",
+      "step": "4 eval",
+      "ok": true,
+      "detail": "status=200 metrics={\"games\": 3, \"avg_score\": 0.0, \"avg_length\": 2000.0, \"scores\": [0.0, 0.0, 0.0]}"
+    },
+    {
+      "usecase": "U06",
+      "step": "5 eval persisted",
+      "ok": false,
+      "detail": "meta={}"
+    },
+    {
+      "usecase": "U06",
+      "step": "6 model challenge (snake vs ai:dqn)",
+      "ok": false,
+      "detail": "status=400 body={\"detail\":\"unknown strategy 'dqn' (choose from [])\"}"
+    },
+    {
+      "usecase": "U06",
+      "step": "6 model vs model (snake)",
+      "ok": false,
+      "detail": "status=400 body={\"detail\":\"游戏 'snake' 不支持模型 vs 模型（未声明双人模式）\"}"
+    },
+    {
+      "usecase": "U11",
+      "step": "1 create pve session",
+      "ok": true,
+      "detail": "sid=019567d4a02a status=active tick=0"
+    },
+    {
+      "usecase": "U11",
+      "step": "2 actions->finish",
+      "ok": true,
+      "detail": "steps=10 tick=10 match_id=1"
+    },
+    {
+      "usecase": "U11",
+      "step": "3 session finished",
+      "ok": true,
+      "detail": "{\"session\":{\"id\":\"019567d4a02a\",\"game\":\"snake\",\"kind\":\"pve\",\"status\":\"finished\",\"tick\":10,\"state\":{\"grid\":[20,20],\"body\":[[19,10],[18,10],[17,10]],\"direction\":3"
+    },
+    {
+      "usecase": "U11",
+      "step": "4 submit score",
+      "ok": true,
+      "detail": "status=200 body={\"id\":1,\"rank\":1,\"name\":\"loopuser\",\"score\":0,\"mode\":\"human\",\"match_id\":1}"
+    },
+    {
+      "usecase": "U11",
+      "step": "5 leaderboard",
+      "ok": true,
+      "detail": "{\"items\":[{\"rank\":1,\"name\":\"loopuser\",\"score\":0,\"mode\":\"human\",\"created_at\":1792553638.5944347}]}"
+    },
+    {
+      "usecase": "U11",
+      "step": "6 replay/again (new session)",
+      "ok": true,
+      "detail": "{\"session\":{\"id\":\"b3f310ba9230\",\"game\":\"snake\",\"kind\":\"pve\",\"status\":\"active\",\"tick\":0,\"state\":{\"body\":[[10,10],[9,10],["
+    },
+    {
+      "usecase": "U13",
+      "step": "1 create room",
+      "ok": true,
+      "detail": "sid=7fb43b089e17 invite=6FPXKV status=waiting"
+    },
+    {
+      "usecase": "U13",
+      "step": "2 join by invite",
+      "ok": true,
+      "detail": "status=200 body={\"session\":{\"id\":\"7fb43b089e17\",\"game\":\"microrts\",\"kind\":\"pvp\",\"status\":\"active\",\"tick\":0,\"state\":{\"grid\":[16,16],\"terrain\":[[0,0,0,0,0,0,0,"
+    },
+    {
+      "usecase": "U13/U15",
+      "step": "3 active session visible",
+      "ok": true,
+      "detail": "active=['7fb43b089e17', 'b3f310ba9230']"
+    },
+    {
+      "usecase": "U13",
+      "step": "4 tick 1",
+      "ok": true,
+      "detail": "p0=200 p1=200"
+    },
+    {
+      "usecase": "U13",
+      "step": "4 tick 2",
+      "ok": true,
+      "detail": "p0=200 p1=200"
+    },
+    {
+      "usecase": "U13",
+      "step": "4 tick 3",
+      "ok": true,
+      "detail": "p0=200 p1=200"
+    },
+    {
+      "usecase": "U13",
+      "step": "5 resign p0",
+      "ok": true,
+      "detail": "status=200 body={\"status\":\"finished\",\"winner\":1}"
+    },
+    {
+      "usecase": "U13",
+      "step": "6 finished",
+      "ok": true,
+      "detail": "body={\"session\":{\"id\":\"7fb43b089e17\",\"game\":\"microrts\",\"kind\":\"pvp\",\"status\":\"finished\",\"tick\":3,\"state\":{\"grid\":[16,16],\"terrain\":[[0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,"
+    },
+    {
+      "usecase": "U13",
+      "step": "7 leaderboard",
+      "ok": true,
+      "detail": "{\"game\":\"microrts\",\"scope\":\"total\",\"items\":[{\"user_id\":4,\"rating\":1216.0,\"games\":1,\"wins\":1,\"name\":\"loopuser2\"},{\"user_id\":3,\"rating\":1184.0,\"games\":1,\"wins\":0,\"name\":\"loopuser\"}]}"
+    },
+    {
+      "usecase": "U13",
+      "step": "8 ratings",
+      "ok": true,
+      "detail": "{\"items\":[{\"user_id\":4,\"rating\":1216.0,\"games\":1,\"wins\":1,\"name\":\"loopuser2\"},{\"user_id\":3,\"rating\":1184.0,\"games\":1,\"wins\":0,\"name\":\"loopuser\"}]}"
+    },
+    {
+      "usecase": "U13",
+      "step": "9 rematch",
+      "ok": true,
+      "detail": "status=200 body={\"session\":{\"id\":\"610ff3ea362a\",\"game\":\"microrts\",\"kind\":\"pvp\",\"status\":\"active\",\"tick\":0,\"state\":{\"grid\":[16,16],\"terrain\":[[0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,"
+    }
+  ],
+  "finished": 1792553638.7820485
+}

@@ -1,0 +1,52 @@
+{
+  "U06": {
+    "model_id": 3,
+    "game": "microrts",
+    "eval": {
+      "games": 3,
+      "avg_score": -0.67,
+      "avg_length": 1201.3,
+      "scores": [
+        0.0,
+        -1.0,
+        -1.0
+      ],
+      "win_rate": 0.0
+    },
+    "challenge_match": {
+      "id": 4,
+      "status": "finished",
+      "winner": 1,
+      "cause": "eliminated",
+      "moves": 931
+    }
+  },
+  "U09": {
+    "ui": "challenge dialog gated by game.meta.opponents",
+    "backend_opponents": [
+      "worker_rush",
+      "light_rush",
+      "ranged_rush"
+    ]
+  },
+  "U15": {
+    "active_before_cleanup": [
+      "4a5895bfd693",
+      "ab28c20aa10c"
+    ]
+  },
+  "U22": {
+    "announcement_id": 1,
+    "public_api": [
+      {
+        "id": 1,
+        "body": "U22 验证：公告已上线到用户侧（2026-10-21）",
+        "active": true,
+        "created_at": 1792568606.2701848
+      }
+    ]
+  },
+  "U02": {
+    "decision": "对局必须登录（用户 2026-10-21 拍板）；游客可看棋盘/排行榜"
+  }
+}

@@ -1,0 +1,72 @@
+{
+  "upload": {
+    "status": 200,
+    "body": {
+      "model": {
+        "id": 2,
+        "owner_id": 3,
+        "game": "snake",
+        "name": "loop-snake-min-2",
+        "model_type": "onnx",
+        "io_contract": "game.snake",
+        "file_path": "/tmp/gp-dev/models/2.onnx",
+        "meta": {},
+        "status": "active",
+        "created_at": 1792553675.3204515
+      }
+    }
+  },
+  "eval": {
+    "status": 200,
+    "body": {
+      "model_id": 2,
+      "metrics": {
+        "games": 3,
+        "avg_score": 0.0,
+        "avg_length": 2000.0,
+        "scores": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    }
+  },
+  "model_after_eval": {
+    "status": 200,
+    "body": {
+      "model": {
+        "id": 2,
+        "owner_id": 3,
+        "game": "snake",
+        "name": "loop-snake-min-2",
+        "model_type": "onnx",
+        "io_contract": "game.snake",
+        "file_path": "/tmp/gp-dev/models/2.onnx",
+        "meta": {
+          "eval": {
+            "games": 3,
+            "avg_score": 0.0,
+            "avg_length": 2000.0,
+            "scores": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          },
+          "evaluated_at": 1792553679.4480188
+        },
+        "status": "active",
+        "created_at": 1792553675.3204515
+      }
+    }
+  },
+  "models_list": {
+    "status": 200,
+    "count": 2
+  },
+  "challenge_snake_ai": {
+    "status": 400,
+    "body": "{\"detail\":\"unknown strategy 'dqn' (choose from [])\"}"
+  }
+}
