@@ -1,0 +1,22 @@
+{
+  "model_ids": [
+    3,
+    4
+  ],
+  "match_id": 3,
+  "final": {
+    "status": "finished",
+    "winner": null,
+    "cause": null
+  },
+  "replay_moves": 1500,
+  "result": {
+    "winner": null,
+    "cause": null,
+    "damage": [
+      0,
+      0
+    ],
+    "tick": 1500
+  }
+}
