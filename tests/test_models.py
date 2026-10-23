@@ -110,6 +110,10 @@ def test_eval_snake_model():
     assert r.status_code == 200, r.text
     m = r.json()["metrics"]
     assert m["games"] == 3 and "avg_score" in m and "avg_length" in m
+    # eval metrics must persist in meta (06 U08 closed-loop criterion)
+    r = client.get(f"/api/v1/models/{model_id}", headers=H)
+    assert r.status_code == 200, r.text
+    assert r.json()["model"]["meta"]["eval"]["games"] == 3
 
 
 def test_delete_model():

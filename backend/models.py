@@ -144,6 +144,24 @@ def load_session(model: dict):
 
 # ------------------------------------------------------------------ eval
 
+def _save_eval(model_id: int, metrics: dict) -> None:
+    """Persist eval metrics into models.meta so they survive reloads."""
+    conn = _db()
+    try:
+        row = conn.execute("SELECT meta FROM models WHERE id=?",
+                           (model_id,)).fetchone()
+        if row is None:
+            return
+        meta = json.loads(row[0] or "{}")
+        meta["eval"] = metrics
+        meta["evaluated_at"] = time.time()
+        conn.execute("UPDATE models SET meta=? WHERE id=?",
+                     (json.dumps(meta), model_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def evaluate(model: dict, games: int = 3) -> dict:
     """Play N games server-side with the model; return metrics dict.
 
@@ -189,4 +207,8 @@ def evaluate(model: dict, games: int = 3) -> dict:
     }
     if opponents:
         metrics["win_rate"] = round(wins / games, 2)
+    try:
+        _save_eval(model["id"], metrics)
+    except Exception:
+        pass  # eval result delivery must not fail on a meta write error
     return metrics
