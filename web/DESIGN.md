@@ -1,3 +1,5 @@
+> **历史文档**：本文件是旧版「亮色极简」实现的视觉规范，已被 `design/README.md`（Lab UI 深/亮双主题）取代。新版前端不再使用 `components/ui/*`、`AppShell`、`page-shell` 等旧约定。
+
 # Stream Web 设计规范(shadcn/ui + Tailwind · 亮色极简风)
 
 迁移目标:所有页面从 antd 重写为 shadcn/ui + Tailwind,**业务逻辑与 API 调用保持不变**。

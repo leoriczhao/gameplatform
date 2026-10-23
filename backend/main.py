@@ -344,6 +344,12 @@ async def index_page() -> HTMLResponse:
 @app.get("/records", include_in_schema=False)
 @app.get("/models/", include_in_schema=False)
 @app.get("/models", include_in_schema=False)
+@app.get("/environments", include_in_schema=False)
+@app.get("/environments/", include_in_schema=False)
+@app.get("/environments/{slug}", include_in_schema=False)
+@app.get("/environments/{slug}/", include_in_schema=False)
+@app.get("/matches", include_in_schema=False)
+@app.get("/matches/", include_in_schema=False)
 # 14 重构 D27：/arena 破坏性移除（无跳转、无别名，直接 404）
 async def spa_game_page(slug: str | None = None) -> HTMLResponse:
     spa = _spa_index()

@@ -1,0 +1,380 @@
+/* 个人资料页 / Profile — Lab UI 页面级样式（仅使用 lab 设计 token） */
+.pf-grid {
+  display: grid;
+  grid-template-columns: 340px minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+/* 名片 */
+.pf-identity {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 22px 18px;
+  text-align: center;
+}
+.pf-avatar {
+  width: 84px;
+  height: 84px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  font-size: 44px;
+  line-height: 1;
+  background: var(--lab-surface-2);
+  border: 1px solid var(--lab-line-2);
+}
+.pf-name {
+  font-family: var(--lab-font-display);
+  font-size: 23px;
+  font-weight: 600;
+  letter-spacing: -0.3px;
+  color: var(--lab-text);
+  margin: 0;
+  line-height: 1.2;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.pf-handle {
+  font-family: var(--lab-font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  color: var(--lab-text-3);
+}
+.pf-badges {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.pf-sig {
+  margin: 2px 0 0;
+  max-width: 280px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--lab-text-2);
+}
+.pf-sig.is-empty {
+  color: var(--lab-text-3);
+  font-style: italic;
+}
+.pf-level {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 6px;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid var(--lab-line);
+  background: var(--lab-surface-2);
+  text-align: left;
+}
+.pf-level__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.pf-level__xp {
+  font-family: var(--lab-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--lab-lime-text);
+}
+.pf-level__hint {
+  font-family: var(--lab-font-mono);
+  font-size: 8px;
+  letter-spacing: 0.03em;
+  color: var(--lab-text-3);
+}
+.pf-identity .lab-rule {
+  margin: 6px 0 2px;
+}
+.pf-identity .lab-meta-row {
+  width: 100%;
+}
+
+/* 编辑资料 */
+.pf-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.pf-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.pf-avatar-field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.pf-avatar-preview {
+  width: 40px;
+  height: 40px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  font-size: 22px;
+  border-radius: 10px;
+  background: var(--lab-surface-2);
+  border: 1px solid var(--lab-line);
+}
+.pf-avatar-field .lab-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.pf-textarea {
+  height: auto;
+  min-height: 86px;
+  padding: 9px 11px;
+  line-height: 1.55;
+  resize: vertical;
+}
+.pf-count {
+  align-self: flex-end;
+  font-family: var(--lab-font-mono);
+  font-size: 8px;
+  color: var(--lab-text-3);
+}
+
+/* 战绩墙 */
+.pf-record {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.pf-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  border: 1px solid var(--lab-line);
+  border-radius: 10px;
+  background: var(--lab-line);
+  overflow: hidden;
+}
+.pf-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 14px 16px;
+  background: var(--lab-surface);
+  min-width: 0;
+}
+.pf-stat__label {
+  font-family: var(--lab-font-mono);
+  font-size: 8px;
+  letter-spacing: 0.08em;
+  color: var(--lab-text-3);
+}
+.pf-stat__value {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  font-family: var(--lab-font-display);
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.4px;
+  color: var(--lab-text);
+}
+.pf-stat__value.is-win {
+  color: var(--lab-green);
+}
+.pf-stat__value.is-loss {
+  color: var(--lab-red);
+}
+.pf-stat__value.is-amber {
+  color: var(--lab-amber);
+}
+.pf-stat__suffix {
+  font-family: var(--lab-font-mono);
+  font-size: 9px;
+  font-weight: 500;
+  color: var(--lab-text-3);
+}
+.pf-games {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 14px;
+}
+.pf-game {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--lab-line);
+  border-radius: 9px;
+  background: var(--lab-surface-2);
+}
+.pf-game__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.pf-game__name {
+  font-family: var(--lab-font-display);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--lab-text);
+}
+.pf-game__body {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.pf-game__figs {
+  display: flex;
+  align-items: center;
+  gap: 26px;
+  flex-wrap: wrap;
+}
+.pf-game__figs > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.pf-game__figs b {
+  font-family: var(--lab-font-display);
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--lab-text);
+}
+.pf-game__figs b.is-amber {
+  color: var(--lab-amber);
+}
+
+/* sparkline */
+.pf-spark {
+  display: block;
+  flex: none;
+  max-width: 100%;
+}
+.pf-spark__line {
+  fill: none;
+  stroke: var(--lab-violet);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.pf-spark__dot {
+  fill: var(--lab-violet);
+}
+.pf-spark__axis {
+  fill: var(--lab-text-3);
+  font-family: var(--lab-font-mono);
+  font-size: 8px;
+}
+.pf-spark-empty {
+  font-family: var(--lab-font-mono);
+  font-size: 9px;
+  color: var(--lab-text-3);
+}
+
+/* 快捷入口 */
+.pf-quick {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.pf-quick__grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+.pf-quick__card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 10px;
+  border: 1px solid var(--lab-line);
+  background: var(--lab-surface);
+  min-width: 0;
+  transition: border-color 180ms ease, background 180ms ease;
+}
+.pf-quick__card:hover {
+  border-color: var(--lab-line-2);
+  background: var(--lab-surface-2);
+}
+.pf-quick__icon {
+  width: 34px;
+  height: 34px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--lab-hover-2);
+  color: var(--lab-text-2);
+}
+.pf-quick__copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.pf-quick__title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--lab-text);
+}
+.pf-quick__desc {
+  font-size: 10.5px;
+  color: var(--lab-text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pf-quick__arrow {
+  margin-left: auto;
+  color: var(--lab-text-3);
+  flex: none;
+}
+
+@media (max-width: 900px) {
+  .pf-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .pf-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .pf-quick__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .pf-sig {
+    max-width: 100%;
+  }
+}
+
+@media (max-width: 720px) {
+  .pf-avatar {
+    width: 68px;
+    height: 68px;
+    font-size: 36px;
+  }
+  .pf-name {
+    font-size: 20px;
+  }
+  .pf-stat {
+    padding: 12px;
+  }
+  .pf-stat__value {
+    font-size: 19px;
+  }
+  .pf-game__body {
+    gap: 12px;
+  }
+  .pf-spark {
+    width: 100%;
+  }
+}
