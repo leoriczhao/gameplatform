@@ -52,10 +52,14 @@ jobs:
           pip install 'torch>=2.6,<3' --index-url https://download.pytorch.org/whl/cpu
           pip install -r backend/requirements.txt -r backend/requirements-dev.txt -e sdk
 
-      - name: pytest
+      - name: pytest (coverage gate)
         env:
           PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
-        run: python -m pytest -q -rs
+        run: >-
+          python -m pytest -q -rs -p pytest_cov
+          --cov=backend
+          --cov-report=term-missing
+          --cov-fail-under=80
 
   web:
     name: Web (test + build)
@@ -78,9 +82,9 @@ jobs:
       - run: npm run build
 
   docker:
-    name: Docker image (build + ready smoke)
+    name: Docker image (build + smoke + browser)
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
 
@@ -109,6 +113,28 @@ jobs:
           echo "container never became ready" >&2
           docker logs gp-smoke
           exit 1
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      # 真实浏览器冒烟：登录 -> 单机对局 -> 对局列表 -> 回放重建/播放 -> 模型页 -> PvP 壳
+      - name: Browser smoke (Lab UI)
+        run: |
+          python -m pip install --upgrade pip
+          pip install 'playwright==1.62.0'
+          python -m playwright install --with-deps chromium
+          python tests/browser_acceptance.py \
+            --base-url http://127.0.0.1:18080 \
+            --output /tmp/browser-acceptance
+
+      - name: Upload browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-acceptance
+          path: /tmp/browser-acceptance
+          retention-days: 7
 
       - name: Container logs
         if: always()

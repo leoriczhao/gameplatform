@@ -96,8 +96,19 @@ Docker 健康检查使用 `/api/ready`，保持非 root、只读文件系统及 
 ```bash
 .venv/bin/pip install 'torch>=2.6,<3' --index-url https://download.pytorch.org/whl/cpu
 .venv/bin/pip install -r backend/requirements-dev.txt
-PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python -m pytest -q
+# 后端全量测试 + 覆盖率门禁（当前 85%，CI 要求 ≥ 80%）
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python -m pytest -q -p pytest_cov \
+  --cov=backend --cov-report=term-missing --cov-fail-under=80
 (cd web && npm test && npm run build)
+
+# 真实浏览器冒烟（Lab UI：登录 → 单机 → 对局列表 → 回放 → 模型 → PvP 壳）
+.venv/bin/pip install playwright==1.62.0
+.venv/bin/python -m playwright install chromium
+.venv/bin/python tests/browser_acceptance.py \
+  --base-url http://127.0.0.1:8080 --output /tmp/browser-acceptance
+
+# 轻量 API 压测（k6，详见 loadtest/README.md）
+k6 run loadtest/k6-smoke.js
 ```
 
 `tests/test_sdk_training.py` 会启动临时本地服务，实际运行两个 DQN 脚本、
@@ -116,7 +127,7 @@ PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python -m pytest -q
 
 | 工作流 | 触发 | 做什么 |
 |---|---|---|
-| `ci.yml` | push `main`、PR | 后端 pytest（Python 3.12 + CPU torch，先检查 Landlock ABI ≥ 3）、前端 `npm test` + `npm run build`、Docker 镜像构建并以生产安全选项启动到 `/api/ready` |
+| `ci.yml` | push `main`、PR | 后端 pytest + **覆盖率门禁 ≥ 80%**（Python 3.12 + CPU torch，先检查 Landlock ABI ≥ 3）、前端 `npm test` + `npm run build`、Docker 镜像构建 + 生产安全选项启动到 `/api/ready` + **Playwright 真实浏览器冒烟**（Lab UI 登录/对局/回放/模型/PvP） |
 | `release.yml` | 推送 `v*` 标签 | 复用 CI → 镜像推到 `ghcr.io/<owner>/gameplatform:<标签>` → 创建 GitHub Release → 调用 Deploy（带 `-` 的预发布标签不部署） |
 | `deploy.yml` | Release 调用，或 Actions 页手动运行 | SSH 到服务器执行 `deploy/release.sh`：备份数据库 → 旧镜像存为 `gameplatform:before-<标签>` → 只重建 `web` → 等 healthy，失败自动切回旧镜像。手动运行填旧标签即为回滚 |
 
