@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel, Field
 
+import package_pipeline
 import ugc
 import ugc_assets
 import ugc_pack
@@ -172,7 +173,7 @@ def package_manifest(slug: str, version: str | None = Query(
             summary="下载游戏包（本地训练）")
 def package_download(slug: str, version: str) -> Response:
     manifest, row = _release(slug, version)
-    data, sha256 = ugc.package_archive(row)
+    data, sha256 = package_pipeline.archive(row["package_path"])
     return Response(data, media_type="application/zip", headers={
         "ETag": f'"{sha256}"',
         "Cache-Control": "public, max-age=31536000, immutable",

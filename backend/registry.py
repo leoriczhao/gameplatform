@@ -5,11 +5,28 @@ platform (env API, leaderboard, frontend page, docs).
 ProxyAdapter 注册）；可注销，发布/下架/版本切换随之进出注册表。"""
 from __future__ import annotations
 
+from typing import Protocol
+
 GAMES: dict = {}
 
 
 class VersionUnavailable(RuntimeError):
     pass
+
+
+class PackageStore(Protocol):
+    """Where archived package versions come from (docs/design/19 §5).
+    The runtime depends on this interface; the UGC store (L3) implements it."""
+
+    def version_adapter(self, slug: str, version: str): ...
+
+
+_STORE: PackageStore | None = None
+
+
+def set_package_store(store: PackageStore) -> None:
+    global _STORE
+    _STORE = store
 
 
 def resolve(game_id: str, version: str | None = None):
@@ -19,8 +36,10 @@ def resolve(game_id: str, version: str | None = None):
         raise VersionUnavailable(f"game {game_id!r} is unavailable")
     if version is None or (getattr(current, "meta", {}) or {}).get("version") == version:
         return current
-    import ugc
-    return ugc.version_adapter(game_id, version)
+    if _STORE is None:
+        raise VersionUnavailable(f"game {game_id!r} version {version!r} is unavailable "
+                                 "(no package store)")
+    return _STORE.version_adapter(game_id, version)
 
 
 def register(adapter, source: str = "builtin"):
