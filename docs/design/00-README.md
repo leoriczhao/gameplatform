@@ -34,6 +34,7 @@
 | [14-对战交互重构设计](./14-对战交互重构设计.md) | **对战交互重构（D27）**：撤掉独立对战中心（/arena 破坏性移除），对战按游戏归属（大厅卡片/游戏页直入该游戏 PvP 页）；PvP 页三 Tab（找对手/对局/排行榜）；模型挑战在游戏页+模型托管页；独立战绩页 /records；大厅卡片实时房间数 | **已交付**（2026-08，评审通过后上线验收） |
 | [15-接入OpenEnv预研](./15-接入OpenEnv预研.md) | OpenEnv（HuggingFace agentic 环境协议）接入预研 + **落地记录**：评估结论（协议模型与无状态批处理根本冲突）→ v1 拍板实施「单独提供一套 OpenEnv 兼容接口」（自实现 wire + HTTP/WS）→ **v2 完整接入官方 openenv==0.4.1 栈**（PlatformEnvironment + create_fastapi_app 子应用，官方 EnvClient 开箱即用） | ✅ v1 MVP + v2 官方栈已交付（2026-09，19 测试全绿） |
 | [16-前端渲染能力开放设计](./16-前端渲染能力开放设计.md) | **渲染 v2（D28-D30）**：L1 声明式渲染（几何/朝向/归属/血条/图层/矢量/动效/HUD）→ L2 资源包（PNG/WebP + OGG/MP3/WAV，魔数校验与内容寻址服务）→ L3 沙箱自定义渲染器（opaque origin iframe + Worker + OffscreenCanvas，能力门禁）；前端 `web/src/render/` | **已交付**（2026-09，L1/L2/L3 全部验收） |
+| [17-对局舞台重构设计](./17-对局舞台重构设计.md) | **对局舞台重构（D31–D36）**：统一 Match / 座位模型、Match actor 服务端推进、SSE 事件流、服务端存帧、视角裁剪、单一舞台 `/m/:id`；破坏性更新；本期只做 turn 时钟，realtime 往后放 | 草案（2026-10-27） |
 
 ## 核心设计决策（Decision Log）
 
