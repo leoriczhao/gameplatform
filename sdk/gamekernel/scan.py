@@ -1,4 +1,4 @@
-"""UGC AST static scan (11 P3, design 10 §5 第二层防线)。
+"""Package static scan (11 P3, design 10 §5 第二层防线；内核共用，GDK 本地可自查)。
 
 上传时解析全部 .py：
 - import 白名单（标准库白名单子集 + numpy；相对导入放行）

@@ -25,6 +25,11 @@ WORKDIR /app/backend
 COPY backend/requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt && rm /tmp/requirements.txt
 
+# gamekernel（docs/design/19）：游戏运行规则，与 SDK 同一份源码。装进 site-packages，
+# 沙箱 worker 以 -I 启动时也能在锁定前导入；--no-deps 不拉 SDK 的训练依赖。
+COPY sdk/ /tmp/sdk/
+RUN pip install --no-cache-dir --no-deps /tmp/sdk && rm -rf /tmp/sdk
+
 COPY backend/ /app/backend/
 COPY static-docs/ /app/static-docs/
 COPY packaged-games/ /app/packaged-games/

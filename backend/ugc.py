@@ -16,12 +16,12 @@ import sqlite3
 import time
 from pathlib import Path
 
-import contract_check
 import registry
+from gamekernel import manifest as kernel_manifest
+from gamekernel import scan as kernel_scan
 import ugc_pack
 import ugc_proxy
 import ugc_runner
-import ugc_static
 
 SCORES_DB = Path(os.environ.get("SCORES_DB", "/data/scores.db"))
 MODELS_DIR = Path(os.environ.get("MODELS_DIR", str(SCORES_DB.parent / "models")))
@@ -323,7 +323,7 @@ def _ingest(data: bytes, expect_slug: str | None = None,
     dest = MODELS_DIR / "ugc" / meta["slug"] / f"v{int(time.time_ns())}"
     ugc_pack.extract_package(data, dest)
     _check_resources(dest)
-    scan = ugc_static.scan_dir(dest)
+    scan = kernel_scan.scan_dir(dest)
     if not scan["ok"]:
         _cleanup_dir(dest)
         head = "; ".join(f"{v['file']}:{v['line']} {v['detail']}"
@@ -337,7 +337,7 @@ def _ingest(data: bytes, expect_slug: str | None = None,
         except (OSError, UnicodeDecodeError):
             _cleanup_dir(dest)
             _reject("渲染器文件不可读（需 UTF-8 文本）")
-        rscan = ugc_static.scan_renderer(rtext)
+        rscan = kernel_scan.scan_renderer(rtext)
         if not rscan["ok"]:
             _cleanup_dir(dest)
             head = "; ".join(f"{v['line']} {v['detail']}"
@@ -493,7 +493,7 @@ def _register_game(game: dict, version: dict) -> None:
                                      on_unhealthy=lambda _sid: fuse(game["id"]))
     info = adapter.info()  # require a usable sandbox before exposing the new version
     # A1：game.yaml contract.* 必须与运行时 schemas 一致（否则拒绝注册）
-    contract_check.validate_contract(meta, info)
+    kernel_manifest.validate_contract(meta, info)
     registry.GAMES[game["slug"]] = adapter
     if game["slug"] not in _MOUNTED_SLUGS and _ROUTER_MOUNTER is not None:
         _ROUTER_MOUNTER(adapter)   # 挂一次即可；env 路由内部按请求动态解析 adapter

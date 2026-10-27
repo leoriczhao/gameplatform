@@ -10,4 +10,4 @@ requires-python = ">=3.10"
 dependencies = ["numpy", "requests", "gymnasium>=1.1", "openenv==0.4.1"]
 
 [tool.setuptools]
-packages = ["gameplatform", "gameplatform.games"]
+packages = ["gameplatform", "gameplatform.games", "gamekernel"]

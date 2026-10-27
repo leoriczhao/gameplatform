@@ -15,6 +15,7 @@ import time
 from pathlib import Path
 
 import inference
+from gamekernel import models as kernel_models
 
 # resolved lazily so tests can set MODELS_DIR after import
 def _models_dir() -> Path:
@@ -166,47 +167,22 @@ def evaluate(model: dict, games: int = 3) -> dict:
     """Play N games server-side with the model; return metrics dict.
 
     13 G3：唯一的通用路径——声明 opponents 的游戏 = 模型 vs 默认对手
-    （双人模式开局），否则单人打分。评估在沙箱内跑（ProxyAdapter）。"""
+    （双人模式开局），否则单人打分。评估在沙箱内跑（ProxyAdapter），
+    对局循环与 SDK evaluate 共用 gamekernel.models.evaluate（19）。"""
     game = model["game"]
     sess = load_session(model)
     from registry import GAMES
     adapter = GAMES[game]
-    opponents = getattr(adapter, "opponents", None) or []
-    scores, lengths, wins = [], [], 0
-
-    for i in range(games):
-        seed = int(time.time_ns() % (1 << 30)) + i
-        if opponents:
-            default = getattr(adapter, "default_opponent", None) or opponents[0]
-            state = adapter.new_state(seed, getattr(adapter, "pvp_options", None))
-            for step in range(1500):
-                if state.get("done"):
-                    break
-                mine = inference.model_action(game, sess, state, owner=0, adapter=adapter)
-                theirs = adapter.opponent_action(
-                    state, {"type": "ai", "strategy": default})
-                state = adapter.step_state(state, {"p0": mine, "p1": theirs})
-            wins += 1 if state.get("winner") == 0 else 0
-            scores.append(float(state.get("score", state.get("reward", 0.0))))
-            lengths.append(state.get("tick", 0))
-        else:
-            state = adapter.new_state(seed)
-            for step in range(2000):
-                if state.get("done"):
-                    break
-                action = inference.model_action(game, sess, state, adapter=adapter)
-                state = adapter.step_state(state, action)
-            scores.append(float(state.get("score", state.get("reward", 0.0))))
-            lengths.append(state.get("tick", 0))
-
-    metrics = {
-        "games": games,
-        "avg_score": round(sum(scores) / len(scores), 2),
-        "avg_length": round(sum(lengths) / len(lengths), 1),
-        "scores": scores,
-    }
-    if opponents:
-        metrics["win_rate"] = round(wins / games, 2)
+    seeds = [int(time.time_ns() % (1 << 30)) + i for i in range(games)]
+    result = kernel_models.evaluate(
+        adapter, adapter.meta,
+        lambda state, owner: inference.model_action(game, sess, state, owner=owner,
+                                                    adapter=adapter),
+        seeds)
+    metrics = {"games": games, "avg_score": result["avg_score"],
+               "avg_length": result["avg_length"], "scores": result["scores"]}
+    if "win_rate" in result:
+        metrics["win_rate"] = result["win_rate"]
     try:
         _save_eval(model["id"], metrics)
     except Exception:

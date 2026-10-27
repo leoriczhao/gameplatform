@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 import ugc_runner
-import ugc_static
+from gamekernel import scan as ugc_static
 
 
 @pytest.mark.parametrize("operation", ["read", "write", "chmod", "socket", "spawn"])
