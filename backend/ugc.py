@@ -611,6 +611,72 @@ def version_row(slug: str, version: str,
     return None
 
 
+# ------------------------------------------------- 本地训练：游戏包分发（18）
+
+_ARCHIVES: dict[str, tuple[bytes, str]] = {}   # package_path -> (zip, sha256)
+_ZIP_EPOCH = (1980, 1, 1, 0, 0, 0)
+
+
+def _is_official(owner_id: int) -> bool:
+    import auth as auth_store
+    u = auth_store.user_by_id(owner_id)
+    return bool(u) and u.get("role") in ("admin", "system")
+
+
+def package_archive(version: dict) -> tuple[bytes, str]:
+    """已解包版本目录 → 确定性 zip（排序、固定时间戳与权限，去掉字节码）。
+    版本目录按版本不可变，结果按 package_path 缓存。"""
+    import hashlib
+    import io
+    import zipfile
+    root = Path(version["package_path"])
+    key = str(root)
+    if key not in _ARCHIVES:
+        if not root.is_dir():
+            raise KeyError("游戏包文件缺失")
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for p in sorted(root.rglob("*")):
+                if p.is_dir() or "__pycache__" in p.parts or p.suffix == ".pyc":
+                    continue
+                info = zipfile.ZipInfo(p.relative_to(root).as_posix(), _ZIP_EPOCH)
+                info.external_attr = 0o644 << 16
+                info.compress_type = zipfile.ZIP_DEFLATED
+                zf.writestr(info, p.read_bytes())
+        data = buf.getvalue()
+        _ARCHIVES[key] = (data, hashlib.sha256(data).hexdigest())
+    return _ARCHIVES[key]
+
+
+def package_release(slug: str, version: str | None = None) -> tuple[dict, dict]:
+    """可供本地训练下载的已发布版本 → (manifest, version_row)。
+
+    官方包始终可下载；UGC 需作者在 game.yaml 声明 local_training: true。
+    KeyError：游戏或版本不存在 / 未发布；PermissionError：未开放本地训练。"""
+    game = get_game_by_slug(slug)
+    if game is None or game["status"] != "published":
+        raise KeyError(f"游戏 {slug!r} 不存在或未发布")
+    if version is None:
+        v = active_version(game["id"])
+    else:
+        found = version_row(slug, version)
+        v = found[1] if found else None
+    if v is None:
+        raise KeyError(f"游戏 {slug!r} 没有可用版本 {version or ''}".strip())
+    meta = dict(v["meta"].get("meta", v["meta"]))
+    official = _is_official(game["owner_id"])
+    if not (official or meta.get("local_training") is True):
+        raise PermissionError("该游戏未开放本地训练（作者需在 game.yaml 声明 local_training: true）")
+    data, sha256 = package_archive(v)
+    manifest = {
+        "slug": slug, "version": v["version"], "official": official,
+        "sha256": sha256, "size": len(data),
+        "url": f"/api/v1/games/{slug}/package/{v['version']}.zip",
+        "meta": meta,
+    }
+    return manifest, v
+
+
 def ban(game_id: int, admin_id: int) -> dict:
     game = get_game(game_id)
     if game is None:

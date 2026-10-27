@@ -15,7 +15,7 @@ from live_server import ROOT, live_server
 
 sys.path.insert(0, str(ROOT / "sdk"))
 from gameplatform import PlatformClient, RemoteVecEnv, export_onnx
-from gameplatform.gym import PlatformRemoteEnv, PlatformRemoteVecEnv
+from gameplatform.gym import PlatformEnv, PlatformVecEnv
 
 
 @pytest.fixture(scope="module")
@@ -70,7 +70,7 @@ def test_train_export_upload_and_model_play(base_url, tmp_path):
         assert torch.isfinite(loss)
         assert not torch.equal(net[1].weight, before)
         path = tmp_path / "trained.onnx"
-        export_onnx(net, "tetris", str(path))
+        export_onnx(net, "tetris", str(path), base_url=base_url)
         client = PlatformClient(base_url)
         client.register("training_smoke", "local-smoke-password")
         model = client.upload_model(str(path), "tetris", "smoke-trained")
@@ -83,8 +83,10 @@ def test_train_export_upload_and_model_play(base_url, tmp_path):
         remote.close()
 
 
-def test_gym_seed_and_terminal_observation(base_url):
-    env = PlatformRemoteEnv(game="snake", obs_mode="grid", base_url=base_url)
+@pytest.mark.parametrize("backend", ["local", "remote"])
+def test_gym_seed_and_terminal_observation(base_url, backend, tmp_path, monkeypatch):
+    monkeypatch.setenv("GAMEPLATFORM_CACHE", str(tmp_path))
+    env = PlatformEnv(game="snake", obs_mode="grid", base_url=base_url, backend=backend)
     try:
         first, info = env.reset(seed=0)
         assert info["state"]["seed"] == 0
@@ -92,8 +94,8 @@ def test_gym_seed_and_terminal_observation(base_url):
         for _ in range(30):
             obs, _, done, _, info = env.step(np.int64(1))
             if done:
-                np.testing.assert_array_equal(obs, env._remote.terminal_obs(info))
-                assert env._remote.states[0]["done"]
+                np.testing.assert_array_equal(obs, env._env.terminal_obs(info))
+                assert env._env.states[0]["done"]
                 with pytest.raises(RuntimeError, match="call reset"):
                     env.step(1)
                 _, reset_info = env.reset()
@@ -106,8 +108,10 @@ def test_gym_seed_and_terminal_observation(base_url):
         env.close()
 
 
-def test_vector_same_step_terminal_contract(base_url):
-    env = PlatformRemoteVecEnv(game="snake", n=2, obs_mode="grid", base_url=base_url)
+@pytest.mark.parametrize("backend", ["local", "remote"])
+def test_vector_same_step_terminal_contract(base_url, backend):
+    env = PlatformVecEnv(game="snake", n=2, obs_mode="grid", base_url=base_url,
+                         backend=backend)
     try:
         env.reset(seed=[0, 1])
         assert env.metadata["autoreset_mode"].value == "SameStep"
@@ -117,7 +121,7 @@ def test_vector_same_step_terminal_contract(base_url):
                 assert np.array_equal(infos["_final_obs"], dones)
                 for i in np.where(dones)[0]:
                     assert infos["final_info"][i]["state"]["done"]
-                    assert not env._remote.states[i]["done"]
+                    assert not env._env.states[i]["done"]
                     assert not np.array_equal(obs[i], infos["final_obs"][i])
                 break
         else:
@@ -292,13 +296,13 @@ def test_remote_close_continues_after_broken_slot(fake_openenv):
     assert all(len(c.calls["close"]) == 1 for c in fake_openenv.instances)
 
 
-@pytest.mark.parametrize("wrapper", [PlatformRemoteEnv, PlatformRemoteVecEnv])
+@pytest.mark.parametrize("wrapper", [PlatformEnv, PlatformVecEnv])
 def test_gym_space_failure_closes_sessions(fake_openenv, monkeypatch, wrapper):
     def fail_space(*args):
         raise ValueError("invalid space")
     monkeypatch.setattr("gameplatform.gym._obs_space", fail_space)
     with pytest.raises(ValueError, match="invalid space"):
-        wrapper(obs_mode="grid")
+        wrapper(obs_mode="grid", backend="remote")
     assert all(len(c.calls["close"]) == 1 for c in fake_openenv.instances)
 
 
@@ -329,7 +333,7 @@ def test_training_and_evaluation_close_sessions(fake_openenv, monkeypatch, game)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     monkeypatch.setattr(module, "DEVICE", "cpu")
-    monkeypatch.setattr(sys, "argv", [spec.origin, "--envs", "2"])
+    monkeypatch.setattr(sys, "argv", [spec.origin, "--envs", "2", "--backend", "remote"])
 
     def fail_train(*args):
         raise RuntimeError("training interrupted")
@@ -339,7 +343,7 @@ def test_training_and_evaluation_close_sessions(fake_openenv, monkeypatch, game)
     assert all(len(c.calls["close"]) == 1 for c in fake_openenv.instances)
 
     fake_openenv.terminal_slots = set(range(10))
-    args = SimpleNamespace(base_url="http://127.0.0.1:8080", obs="grid")
+    args = SimpleNamespace(base_url="http://127.0.0.1:8080", obs="grid", backend="remote")
     module.evaluate(torch.nn.Linear(2, 4), args, episodes=3)
     assert len(fake_openenv.instances) == 5  # two training + three single-episode evals
     assert all(len(c.calls["close"]) == 1 for c in fake_openenv.instances)

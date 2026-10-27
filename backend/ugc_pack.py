@@ -599,7 +599,8 @@ def validate_meta(meta, builtin_games=None, files=None) -> dict:
     known = {"slug", "title", "description", "version", "board", "units",
              "contract", "ai_strategies", "pvp", "opponents",
              "default_opponent", "controls",
-             "assets", "sounds", "renderer"}   # v2（12 §3）+ 渲染 v2（16）
+             "assets", "sounds", "renderer",   # v2（12 §3）+ 渲染 v2（16）
+             "local_training"}                 # 本地训练分发（18）
     unknown = set(meta) - known
     if unknown:
         raise _err(f"game.yaml 存在未知字段：{', '.join(sorted(unknown))}")
@@ -811,6 +812,10 @@ def validate_meta(meta, builtin_games=None, files=None) -> dict:
             c_out["keys"] = c_out.get("keys", {})
             c_out["keys"][k] = [int(v[0]), v[1]]
         out["controls"] = c_out
+    if meta.get("local_training") is not None:
+        if not isinstance(meta["local_training"], bool):
+            raise _err("local_training 需为布尔值")
+        out["local_training"] = meta["local_training"]
     return out
 
 

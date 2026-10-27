@@ -1,51 +1,67 @@
-"""Export trained torch networks to the platform's ONNX model contracts.
+"""Export trained torch networks to a game's ONNX model contract.
 
-Each game declares ONE standard I/O contract; the server validates uploaded
-files against it (see backend/inference.py IO_CONTRACTS):
-
-    snake.q3      in float32 (1,1334)      -> out (1,3)    Q values
-    tetris.q4     in float32 (1,2,20,10)   -> out (1,4)    Q values
-    microrts.c140 in float32 (1,1546)      -> out (1,140)  cmd x dir x type logits
-
-Usage:
+Each game package declares ONE I/O contract in its game.yaml
+(``contract: {in_shape, out_shape, protocol, obs_mode?}``); the server
+validates uploaded files against it (backend/inference.py). The exporter reads
+the same declaration from the package, so it works for every game, UGC
+included, and always matches the version you trained on:
 
     import torch
+    from gameplatform import LocalVecEnv
     from gameplatform.export import export_onnx
 
-    net = MLP(1334, 3)                      # trained with obs_mode="rotwin"
-    export_onnx(net, game="snake", path="my_snake_dqn.onnx")
+    envs = LocalVecEnv(game="snake", n=64, obs_mode="rotwin", base_url=URL)
+    ...                                     # train net on envs
+    export_onnx(net, game=envs.runtime, path="my_snake_dqn.onnx")
 
-The export verifies the I/O shapes exactly like the server does, so a file
-that passes here will pass the upload check.
+``game`` may also be a slug (the package is fetched from ``base_url``, or
+reused from the local cache when ``version`` is given). The export verifies the
+I/O shapes exactly like the server does, so a file that passes here will pass
+the upload check.
 """
 from __future__ import annotations
 
-CONTRACTS = {
-    "snake":    {"name": "snake.q3",      "input": (1, 1334),      "output": (1, 3)},
-    "tetris":   {"name": "tetris.q4",     "input": (1, 2, 20, 10), "output": (1, 4)},
-    "microrts": {"name": "microrts.c140", "input": (1, 1546),      "output": (1, 140)},
-}
+import os
+from pathlib import Path
+
+from .local import LocalGame, _load_yaml, _read_manifest, contract_of, fetch_package
+from .remote import DEFAULT_BASE_URL
 
 
-def export_onnx(net, game: str, path: str, sample_input=None,
-                verify: bool = True) -> str:
+def _contract(game, base_url: str, version: str | None) -> dict:
+    """Read the contract without importing (running) any package code."""
+    if isinstance(game, LocalGame):
+        meta = game.meta
+    elif isinstance(game, Path) or os.sep in game or game.startswith("."):
+        manifest = _read_manifest(Path(game))
+        meta = manifest["meta"] if manifest else _load_yaml(Path(game) / "game.yaml")
+    else:
+        # Downloading is not executing: no trust_remote_code needed for metadata.
+        meta = _read_manifest(fetch_package(game, version, base_url=base_url,
+                                            trust_remote_code=True))["meta"]
+    contract = contract_of(meta)
+    if contract is None:
+        raise ValueError(f"game {meta['slug']!r} declares no model contract")
+    return contract
+
+
+def export_onnx(net, game, path: str, sample_input=None, verify: bool = True, *,
+                base_url: str = DEFAULT_BASE_URL, version: str | None = None) -> str:
     """Trace `net` into an ONNX file matching `game`'s contract.
 
     - `net`: a torch.nn.Module (callable on a float32 batch of the contract
       input shape, returning a float32 tensor of the contract output shape).
+    - `game`: a LocalGame (e.g. ``envs.runtime``), a slug, or a package dir.
     - `sample_input`: optional torch tensor; defaults to a random tensor of
       the contract input shape (fine for fixed-shape policy nets).
-    - returns the matched contract name ("snake.q3" etc.).
+    - returns the matched contract name ("game.snake" etc.).
     """
     try:
         import torch
     except ImportError as e:  # pragma: no cover
         raise ImportError("export_onnx needs torch: pip install torch") from e
 
-    spec = CONTRACTS.get(game)
-    if spec is None:
-        raise ValueError(f"unknown game {game!r}; choose from {sorted(CONTRACTS)}")
-
+    spec = _contract(game, base_url, version)
     if sample_input is None:
         sample_input = torch.rand(*spec["input"], dtype=torch.float32)
     else:
@@ -64,11 +80,11 @@ def export_onnx(net, game: str, path: str, sample_input=None,
             dynamic_axes=None,  # contracts are fixed-shape
         )
     if verify:
-        _verify(path, game)
+        _verify(path, spec)
     return spec["name"]
 
 
-def _verify(path: str, game: str) -> None:
+def _verify(path: str, spec: dict) -> None:
     """Same shape check as the server's upload validation."""
     try:
         import numpy as np
@@ -76,7 +92,6 @@ def _verify(path: str, game: str) -> None:
     except ImportError as e:  # pragma: no cover
         raise ImportError("verification needs numpy + onnxruntime") from e
 
-    spec = CONTRACTS[game]
     sess = ort.InferenceSession(path, providers=["CPUExecutionProvider"])
     ins = sess.get_inputs()
     outs = sess.get_outputs()

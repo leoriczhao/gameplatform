@@ -1,10 +1,10 @@
-"""Minimal DQN training for Tetris over official OpenEnv WebSocket sessions.
+"""Minimal DQN training for Tetris.
 
-The training loop and model run locally; each server slot owns one WS session.
-Slots advance sequentially: n round trips per vector step, not one batch HTTP
-request. Versions are pinned; rewards are sent only at reset and stay fixed
-for that episode. Failed steps are not retried. All training/evaluation sockets
-close on exit. Leave one server slot free for evaluation (currently --envs <= 63).
+--backend local (default) downloads the tetris package once and steps it
+in-process with the server's exact dynamics. --backend remote drives official
+OpenEnv WebSocket sessions instead: n round trips per vector step, and one
+server slot must stay free for evaluation (--envs <= 63). Versions are pinned;
+rewards are fixed per episode.
 Export compatible ONNX models and upload them with PlatformClient to play.
 
     pip install -r sdk/requirements.txt torch && pip install -e sdk
@@ -26,7 +26,9 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from gameplatform import RemoteVecEnv
+from gameplatform import LocalVecEnv, RemoteVecEnv
+
+BACKENDS = {"local": LocalVecEnv, "remote": RemoteVecEnv}
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 N_ACTIONS = 4  # 0=left 1=right 2=rotate 3=hard_drop
@@ -48,7 +50,10 @@ class MLP(nn.Module):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--base-url", default="https://games.cree1p.com")
-    ap.add_argument("--envs", type=int, default=32, help="sequential WS slots; leave one of the server slots free for eval")
+    ap.add_argument("--backend", default="local", choices=sorted(BACKENDS),
+                    help="local: run the downloaded game package in-process; "
+                         "remote: one OpenEnv WS round trip per slot per step")
+    ap.add_argument("--envs", type=int, default=32, help="parallel episodes (remote: WS slots; leave one server slot free for eval)")
     ap.add_argument("--episodes", type=int, default=200, help="total episodes to run")
     ap.add_argument("--obs", default="grid", choices=["grid"])
     ap.add_argument("--reward-line", type=float, default=1.0)
@@ -73,19 +78,19 @@ def main():
     random.seed(args.seed)
     np.random.seed(args.seed)
 
-    with RemoteVecEnv(game="tetris", n=args.envs, base_url=args.base_url,
+    with BACKENDS[args.backend](game="tetris", n=args.envs, base_url=args.base_url,
                         seed=args.seed, obs_mode=args.obs,
                         rewards={"line": args.reward_line,
                                  "step": args.reward_step,
                                  "death": args.reward_death}) as envs:
-        if args.envs >= envs.max_concurrent_envs:
+        if args.backend == "remote" and args.envs >= envs.max_concurrent_envs:
             raise ValueError("leave one OpenEnv slot free for evaluation: "
                              f"--envs must be below {envs.max_concurrent_envs}")
         train(envs, args)
 
 
 def train(envs, args):
-    print(f"[env] {args.envs} remote envs, obs={args.obs} ({envs.obs_dim} dims), "
+    print(f"[env] {args.envs} {args.backend} envs, obs={args.obs} ({envs.obs_dim} dims), "
           f"device={DEVICE}, url={args.base_url}")
 
     net = MLP(envs.obs_dim).to(DEVICE)
@@ -160,7 +165,7 @@ def evaluate(net, args, episodes=3):
     """Greedy eval on fresh seeds; returns (mean score, mean lines)."""
     scores, lines = [], []
     for _ in range(episodes):
-        with RemoteVecEnv(game="tetris", n=1, base_url=args.base_url,
+        with BACKENDS[args.backend](game="tetris", n=1, base_url=args.base_url,
                          seed=random.randrange(1 << 30), obs_mode=args.obs, autoreset=False) as e:
             obs = e._last_obs.reshape(1, -1)
             for _ in range(500):  # free moves don't tick; hard drops advance

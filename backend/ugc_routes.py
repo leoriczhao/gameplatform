@@ -149,6 +149,37 @@ def get_render_frame(slug: str, version: str) -> HTMLResponse:
                         headers=ugc_assets.FRAME_HEADERS)
 
 
+# ------------------------------------------------- 本地训练：游戏包分发（18）
+
+def _release(slug: str, version: str | None):
+    try:
+        return ugc.package_release(slug, version)
+    except KeyError as e:
+        raise HTTPException(404, str(e.args[0]) if e.args else "游戏不存在")
+    except PermissionError as e:
+        raise HTTPException(403, str(e))
+
+
+@router.get("/api/v1/games/{slug}/package", summary="游戏包清单（本地训练）")
+def package_manifest(slug: str, version: str | None = Query(
+        None, max_length=24, description="精确版本；缺省为当前发布版本")) -> dict:
+    """返回 sha256 / 大小 / 下载地址 / 规范化 game.yaml。SDK 据此下载并校验。"""
+    manifest, _ = _release(slug, version)
+    return manifest
+
+
+@router.get("/api/v1/games/{slug}/package/{version}.zip",
+            summary="下载游戏包（本地训练）")
+def package_download(slug: str, version: str) -> Response:
+    manifest, row = _release(slug, version)
+    data, sha256 = ugc.package_archive(row)
+    return Response(data, media_type="application/zip", headers={
+        "ETag": f'"{sha256}"',
+        "Cache-Control": "public, max-age=31536000, immutable",
+        "Content-Disposition": f'attachment; filename="{slug}-{manifest["version"]}.zip"',
+    })
+
+
 # ---------------------------------------------------------------- admin face
 
 @admin_router.get("", summary="审核队列 / 全部游戏")
