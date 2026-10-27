@@ -1,11 +1,14 @@
 [run]
-source = backend
+source =
+    backend
+    sdk/gamekernel
 omit =
     tests/*
     */tests/*
     */__pycache__/*
     .venv/*
-    sdk/*
+    sdk/gameplatform/*
+    sdk/examples/*
     web/*
 
 [report]

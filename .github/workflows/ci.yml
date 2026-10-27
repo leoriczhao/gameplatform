@@ -58,6 +58,7 @@ jobs:
         run: >-
           python -m pytest -q -rs -p pytest_cov
           --cov=backend
+          --cov=sdk/gamekernel
           --cov-report=term-missing
           --cov-fail-under=80
 
