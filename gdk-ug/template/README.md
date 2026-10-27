@@ -4,7 +4,7 @@
 2. 实现契约（见 `__init__.py` 的 docstring），`state` 顶层必须含
    `board: [[cell_id, …]×h]`（cell_id 都在 palette 里），可选 `units`；同时在
    `info().schemas` 声明 state、action 和各 observation 模式的 JSON Schema；
-3. 本地自测：`python gdk-ug/test_runner.py <你的目录>`；
+3. 本地自测：先 `pip install -e sdk pyyaml`，再 `python gdk-ug/test_runner.py <你的目录>`（game.yaml 校验与静态扫描和平台上传时是同一份代码）；
 4. 上传：打包 `zip -r mygame.zip game.yaml __init__.py …`（≤20MB，仅文本文件），
    到平台「上传游戏」页提交，等待管理员审核后公开发布。
 

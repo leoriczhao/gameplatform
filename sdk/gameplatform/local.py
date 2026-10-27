@@ -23,13 +23,10 @@ official packages run without it.
 from __future__ import annotations
 
 import hashlib
-import importlib.util
 import io
 import json
-import math
 import os
 import shutil
-import sys
 import tempfile
 import zipfile
 from pathlib import Path
@@ -37,9 +34,15 @@ from urllib.parse import quote
 
 import numpy as np
 import requests
+from gamekernel import models as kernel_models
+from gamekernel.calls import GameCalls
+from gamekernel.episode import Episode, checked_rewards
+from gamekernel.loader import load_package
 
 from .games import make_obs_fn
 from .remote import DEFAULT_BASE_URL, _json_value
+
+contract_of = kernel_models.contract_of  # the package's model contract (normalized)
 
 def cache_root() -> Path:
     """$GAMEPLATFORM_CACHE, else ~/.cache/gameplatform (read on every call)."""
@@ -50,12 +53,6 @@ EPISODE_SEED_STRIDE = 100003  # same per-episode seed advance as RemoteVecEnv
 
 
 # ------------------------------------------------------------------ packages
-
-def _wire(value):
-    """The sandbox worker's JSON boundary: tuples become lists, unknown
-    objects become strings. Applied to every package output for parity."""
-    return json.loads(json.dumps(value, default=str, ensure_ascii=False))
-
 
 def _safe_extract(data: bytes, dest: Path) -> None:
     with zipfile.ZipFile(io.BytesIO(data)) as zf:
@@ -137,8 +134,8 @@ def _detail(resp) -> str:
 
 
 class LocalGame:
-    """One game package imported in-process, with the server worker's call
-    semantics (reward-argument fallback, ai_action fallback, JSON boundary)."""
+    """One game package imported in-process behind the kernel's call semantics
+    (gamekernel.calls), with the sandbox's JSON boundary on every output."""
 
     def __init__(self, path: str | Path, meta: dict | None = None):
         self.path = Path(path).resolve()
@@ -149,38 +146,17 @@ class LocalGame:
         self.slug = meta["slug"]
         self.version = str(meta.get("version"))
         self.official = bool(manifest and manifest.get("official"))
-        self._adapter = self._import()
-        info = self._adapter.info() if hasattr(self._adapter, "info") else {}
-        info = _wire(info if isinstance(info, dict) else {})
+        digest = hashlib.sha256(str(self.path).encode()).hexdigest()[:10]
+        self.calls = GameCalls(
+            load_package(self.path, f"_gameplatform_pkg_{self.slug.replace('-', '_')}_{digest}"),
+            wire_outputs=True)
+        info = self.calls.info()
+        info = info if isinstance(info, dict) else {}
         board = meta.get("board") or {}
         if board.get("width") and board.get("height"):
-            info.setdefault("grid", [board["width"], board["height"]])
+            info.setdefault("grid", [board["width"], board["height"]])  # as ProxyAdapter
         self.info = info
 
-    def _import(self):
-        digest = hashlib.sha256(str(self.path).encode()).hexdigest()[:10]
-        name = f"_gameplatform_pkg_{self.slug.replace('-', '_')}_{digest}"
-        if name in sys.modules:
-            return sys.modules[name].get_adapter()
-        spec = importlib.util.spec_from_file_location(
-            name, self.path / "__init__.py", submodule_search_locations=[str(self.path)])
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[name] = module  # needed for the package's relative imports
-        # Like the sandbox worker, expose the package dir so absolute imports of
-        # the package's own modules work. Two packages that both use absolute
-        # imports of same-named modules cannot share one process.
-        if str(self.path) not in sys.path:
-            sys.path.insert(0, str(self.path))
-        try:
-            spec.loader.exec_module(module)
-        except BaseException:
-            sys.modules.pop(name, None)
-            raise
-        if not callable(getattr(module, "get_adapter", None)):
-            raise RuntimeError(f"{self.path} does not expose get_adapter()")
-        return module.get_adapter()
-
-    # --------------------------------------------------------------- engine
     @property
     def contract(self) -> dict | None:
         return contract_of(self.meta)
@@ -193,69 +169,36 @@ class LocalGame:
     def opponents(self) -> list[str]:
         return list(self.meta.get("opponents") or [])
 
+    # NumPy inputs are normalized the way RemoteVecEnv serializes them.
     def new_state(self, seed: int, options: dict | None = None) -> dict:
-        return _wire(self._adapter.new_state(int(seed), _json_value(options)))
+        return self.calls.new_state(int(seed), _json_value(options))
 
     def step_state(self, state: dict, action, rewards: dict | None = None) -> dict:
-        action = _json_value(action)
-        if rewards is None:
-            return _wire(self._adapter.step_state(state, action))
-        try:
-            return _wire(self._adapter.step_state(state, action, rewards))
-        except TypeError:
-            return _wire(self._adapter.step_state(state, action))
+        return self.calls.step_state(state, _json_value(action), rewards)
 
     def validate_state(self, state: dict) -> None:
-        self._adapter.validate_state(state)
+        self.calls.validate_state(state)
 
     def validate_action(self, action, state: dict | None = None) -> None:
-        self._adapter.validate_action(_json_value(action), state)
+        self.calls.validate_action(_json_value(action), state)
 
     def obs(self, state: dict, mode: str | None = None):
-        if not hasattr(self._adapter, "obs"):
-            return None
-        return _wire(self._adapter.obs(state, mode))
+        return self.calls.obs(state, mode)
 
     def obs_array(self, state: dict, mode: str | None = None) -> np.ndarray | None:
-        """obs() as float32, the way the server packs OpenEnv tensors. A plain
-        (nested) number list survives the JSON boundary unchanged, so only
-        other return types take the slow JSON path the worker would apply."""
-        if not hasattr(self._adapter, "obs"):
-            return None
-        obs = self._adapter.obs(state, mode)
-        if obs is None:
-            return None
-        if not isinstance(obs, (list, tuple)):
-            obs = _wire(obs)
-        return np.asarray(obs, dtype=np.float32)
+        return self.calls.obs_array(state, mode)
 
     def opponent_action(self, state: dict, config: dict):
-        return _wire(self._adapter.opponent_action(state, config))
+        return self.calls.opponent_action(state, config)
 
     def sample_action(self, state: dict):
-        return _wire(self._adapter.sample_action(state))
+        return self.calls.sample_action(state)
 
     def model_inputs(self, state: dict, owner: int = 0):
-        try:
-            return _wire(self._adapter.model_inputs(state, owner))
-        except TypeError:
-            return _wire(self._adapter.model_inputs(state))
+        return self.calls.model_inputs(state, owner)
 
     def model_decode(self, outputs, state: dict, owner: int = 0):
-        try:
-            return _wire(self._adapter.model_decode(outputs, state, owner))
-        except TypeError:
-            return _wire(self._adapter.model_decode(outputs, state))
-
-
-def contract_of(meta: dict) -> dict | None:
-    """The package's model contract, normalized like backend/inference.py."""
-    c = meta.get("contract")
-    if not isinstance(c, dict) or not c.get("in_shape") or not c.get("out_shape"):
-        return None
-    return {"name": f"game.{meta['slug']}", "input": tuple(c["in_shape"]),
-            "output": tuple(c["out_shape"]),
-            "protocol": c.get("protocol", "simple"), "obs_mode": c.get("obs_mode")}
+        return self.calls.model_decode(outputs, state, owner)
 
 
 def _load_yaml(path: Path) -> dict:
@@ -276,30 +219,6 @@ def load_game(game: str | Path, version: str | None = None, *,
         return LocalGame(game)
     return LocalGame(fetch_package(game, version, base_url=base_url, cache_dir=cache_dir,
                                    trust_remote_code=trust_remote_code))
-
-
-def _coerce_reward(reward) -> float:
-    """The server's reward coercion; RemoteVecEnv turns its None into NaN."""
-    try:
-        return float(reward)
-    except (TypeError, ValueError):
-        return float("nan")
-
-
-def checked_rewards(info: dict, rewards: dict | None) -> dict:
-    """Same reward override rules as the server's OpenEnv reset."""
-    if rewards is not None and not isinstance(rewards, dict):
-        raise ValueError("rewards must be an object")
-    defaults = info.get("default_rewards") or {}
-    result = {**defaults, **(rewards or {})}
-    for key, value in result.items():
-        if key not in defaults:
-            raise ValueError(f"unknown reward key {key!r}")
-        number = float(value)
-        if not math.isfinite(number) or abs(number) > 1000:
-            raise ValueError(f"reward {key!r} out of range [-1000, 1000]")
-        result[key] = number
-    return result
 
 
 # ------------------------------------------------------------------ vector env
@@ -331,6 +250,7 @@ class LocalVecEnv:
         self.actions = list(self.info.get("actions") or [])
         self.num_actions = len(self.actions)
         self.rewards = checked_rewards(self.info, rewards)
+        self._episodes = [Episode(self.runtime, self.info, rewards) for _ in range(self.n)]
         self._closed = False
         self.states: list[dict] | None = None
         self._last_obs = None
@@ -351,7 +271,7 @@ class LocalVecEnv:
         return self.obs_mode != "state" and self.obs_mode in self.server_modes
 
     def _reset_one(self, i: int) -> dict:
-        state = self.runtime.new_state(self._episode_seeds[i], self.new_options)
+        state = self._episodes[i].reset(self._episode_seeds[i], self.new_options)
         self._episode_seeds[i] += EPISODE_SEED_STRIDE
         return state
 
@@ -383,13 +303,11 @@ class LocalVecEnv:
         if self._dones.any():
             raise RuntimeError("episode has ended; call reset() before step()")
         next_states, rewards, dones, infos, server_obs = [], [], [], [], []
-        for state, action in zip(self.states, actions):
-            action = _json_value(action)
-            self.runtime.validate_action(action, state)
-            nxt = self.runtime.step_state(state, action, self.rewards)
+        for ep, action in zip(self._episodes, actions):
+            nxt, reward, done = ep.step(_json_value(action))
             next_states.append(nxt)
-            rewards.append(_coerce_reward(nxt.get("reward", 0.0)))
-            dones.append(bool(nxt.get("done", False)))
+            rewards.append(float("nan") if reward is None else reward)  # as RemoteVecEnv
+            dones.append(done)
             info = {"state": nxt, "cause": nxt.get("cause"), "score": nxt.get("score")}
             for key in ("ate", "lines"):
                 if key in nxt:
@@ -445,21 +363,13 @@ class LocalVecEnv:
 # ------------------------------------------------------------------ models
 
 def model_action(game: LocalGame, session, state: dict, owner: int = 0):
-    """The platform's model protocol (backend/inference.py), run locally."""
+    """The platform's model protocol (gamekernel.models), run locally."""
     c = game.contract
     if c is None:
         raise ValueError(f"game {game.slug!r} declares no model contract")
-    run = lambda x: session.run(None, {session.get_inputs()[0].name: x})[0]  # noqa: E731
-    if c["protocol"] == "composite":
-        xs = [np.asarray(x, dtype=np.float32).reshape(c["input"])
-              for x in game.model_inputs(state, owner)]
-        outs = [np.asarray(run(x), dtype=np.float32).ravel().tolist() for x in xs]
-        return game.model_decode(outs, state, owner)
-    mode = c.get("obs_mode") or (game.obs_modes[0] if game.obs_modes else None)
-    obs = game.obs_array(state, mode)
-    if obs is None:
-        raise ValueError(f"game {game.slug!r} has no obs for models")
-    return int(np.argmax(run(obs.reshape(c["input"]))[0]))
+    return kernel_models.model_action(
+        game, c, lambda x: session.run(None, {session.get_inputs()[0].name: x})[0],
+        state, owner, obs_modes=game.obs_modes)
 
 
 def evaluate(model_path: str | Path, game: str | Path | LocalGame, *, episodes: int = 10,
@@ -476,33 +386,12 @@ def evaluate(model_path: str | Path, game: str | Path | LocalGame, *, episodes: 
     runtime = game if isinstance(game, LocalGame) else load_game(
         game, version, base_url=base_url, trust_remote_code=trust_remote_code)
     session = ort.InferenceSession(str(model_path), providers=["CPUExecutionProvider"])
-    two_sided = bool(runtime.opponents)
-    strategy = opponent or runtime.meta.get("default_opponent") or (
-        runtime.opponents[0] if two_sided else None)
-    options = (runtime.meta.get("pvp") or {}).get("options") if two_sided else None
-    scores, lengths, wins = [], [], 0
-    for i in range(episodes):
-        state = runtime.new_state(seed + i, options)
-        for _ in range(1500 if two_sided else 2000):
-            if state.get("done"):
-                break
-            mine = model_action(runtime, session, state, owner=0)
-            if two_sided:
-                theirs = runtime.opponent_action(state, {"type": "ai", "strategy": strategy})
-                state = runtime.step_state(state, {"p0": mine, "p1": theirs})
-            else:
-                state = runtime.step_state(state, mine)
-        if two_sided and state.get("winner") == 0:
-            wins += 1
-        scores.append(float(state.get("score", state.get("reward", 0.0)) or 0.0))
-        lengths.append(state.get("tick", 0))
-    metrics = {"game": runtime.slug, "version": runtime.version, "episodes": episodes,
-               "seeds": [seed, seed + episodes - 1],
-               "avg_score": round(sum(scores) / episodes, 2),
-               "avg_length": round(sum(lengths) / episodes, 1), "scores": scores}
-    if two_sided:
-        metrics.update(win_rate=round(wins / episodes, 2), opponent=strategy)
-    return metrics
+    seeds = list(range(seed, seed + episodes))
+    result = kernel_models.evaluate(
+        runtime, runtime.meta, lambda state, owner: model_action(runtime, session, state, owner),
+        seeds, opponent=opponent)
+    return {"game": runtime.slug, "version": runtime.version,
+            "seeds": [seeds[0], seeds[-1]], **result}
 
 
 # ------------------------------------------------------------------ parity
