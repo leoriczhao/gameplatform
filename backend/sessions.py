@@ -23,7 +23,7 @@ import uuid
 
 import httpx
 
-import growth
+import events
 import inference
 import models as model_store
 from registry import GAMES, resolve
@@ -232,9 +232,7 @@ def step_session(sess: PlaySession, action,
             sess.status = "finished"
             sess.winner = nxt.get("winner")
             sess.cause = nxt.get("cause")
-            if not getattr(sess, "_xp_awarded", False):
-                growth.award_pve(sess)   # 08 §1; registered users only
-                sess._xp_awarded = True
+            events.emit_match_finished(sess)   # XP 等由订阅方处理（19 §5）
         return nxt
 
 

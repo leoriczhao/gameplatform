@@ -15,7 +15,7 @@ import threading
 import time
 from pathlib import Path
 
-import growth
+import events
 import inference
 import models as model_store
 from registry import GAMES, resolve
@@ -46,6 +46,13 @@ def _db() -> sqlite3.Connection:
                finished_at REAL
            )"""
     )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS rating_history (
+               id INTEGER PRIMARY KEY AUTOINCREMENT, game TEXT NOT NULL,
+               user_id INTEGER NOT NULL, rating REAL NOT NULL,
+               created_at REAL NOT NULL)""")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_rh_game_user ON rating_history(game, user_id, id)")
     conn.execute(
         """CREATE TABLE IF NOT EXISTS ratings (
                game TEXT NOT NULL,
@@ -95,7 +102,6 @@ def get_rating(game: str, user_id: int) -> float:
 
 def update_ratings(game: str, p0_id: int, p1_id: int, winner: int | None) -> None:
     """ELO update after a finished human PvP match (winner None = draw)."""
-    growth.ensure_schema()   # rating_history lives in the growth schema
     conn = _db()
     try:
         ratings = _get_ratings(conn, game, [p0_id, p1_id])
@@ -119,6 +125,19 @@ def update_ratings(game: str, p0_id: int, p1_id: int, winner: int | None) -> Non
         conn.commit()
     finally:
         conn.close()
+
+
+def rating_history(game: str, user_id: int, limit: int = 50) -> list[dict]:
+    """ELO after each settlement, oldest first (for the 走势 sparkline)."""
+    conn = _db()
+    try:
+        rows = conn.execute(
+            "SELECT rating, created_at FROM rating_history "
+            "WHERE game = ? AND user_id = ? ORDER BY id DESC LIMIT ?",
+            (game, user_id, limit)).fetchall()
+    finally:
+        conn.close()
+    return [{"rating": r[0], "created_at": r[1]} for r in reversed(rows)]
 
 
 # ----------------------------------------------------------------- records
@@ -159,10 +178,8 @@ def record_pvp_finish(sess) -> int:
         conn.close()
     if getattr(sess, "mode", "ranked") == "ranked":
         update_ratings(sess.game, sess.p0["id"], sess.p1["id"], sess.winner)
-    # XP for both players regardless of mode (08 §1; per-session idempotent)
-    if not getattr(sess, "_xp_awarded", False):
-        growth.award_pvp(sess)
-        sess._xp_awarded = True
+    # XP 等由 match_finished 订阅方处理（08 §1 / 19 §5；每局只发一次）
+    events.emit_match_finished(sess)
     return match_id
 
 

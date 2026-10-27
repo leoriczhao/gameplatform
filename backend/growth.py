@@ -2,7 +2,8 @@
 
 Numbers: docs/design/08-成长与赛事数值.md（XP 表、等级曲线 50·n·(n-1)）。
 - xp_events: append-only ledger; users.xp keeps the cached total
-- rating_history: one row per ELO settlement (for the 走势 sparkline)
+- XP is awarded by subscribing to the match domain's match_finished event
+  (docs/design/19 §5); ELO and its history belong to matches (L2)
 - stats/me + weekly board aggregate the matches table
 """
 from __future__ import annotations
@@ -12,6 +13,9 @@ import os
 import sqlite3
 import time
 from pathlib import Path
+
+import events
+import matches
 
 SCORES_DB = Path(os.environ.get("SCORES_DB", "/data/scores.db"))
 
@@ -36,13 +40,6 @@ def _db() -> sqlite3.Connection:
         "CREATE INDEX IF NOT EXISTS idx_xp_user ON xp_events(user_id, id)")
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_xp_game_time ON xp_events(game, created_at)")
-    conn.execute(
-        """CREATE TABLE IF NOT EXISTS rating_history (
-               id INTEGER PRIMARY KEY AUTOINCREMENT, game TEXT NOT NULL,
-               user_id INTEGER NOT NULL, rating REAL NOT NULL,
-               created_at REAL NOT NULL)""")
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_rh_game_user ON rating_history(game, user_id, id)")
     return conn
 
 
@@ -117,19 +114,11 @@ def award_pve(sess) -> None:
         award_xp(uid, sess.game, "pve_win", XP_PVE_WIN)
 
 
-# --------------------------------------------------------- rating history
+def _on_match_finished(sess) -> None:
+    award_pvp(sess) if sess.kind == "pvp" else award_pve(sess)
 
 
-def rating_history(game: str, user_id: int, limit: int = HISTORY_LIMIT) -> list[dict]:
-    conn = _db()
-    try:
-        rows = conn.execute(
-            "SELECT rating, created_at FROM rating_history "
-            "WHERE game = ? AND user_id = ? ORDER BY id DESC LIMIT ?",
-            (game, user_id, limit)).fetchall()
-    finally:
-        conn.close()
-    return [{"rating": r[0], "created_at": r[1]} for r in reversed(rows)]
+events.subscribe("match_finished", _on_match_finished)
 # ------------------------------------------------------------- stats / boards
 
 def _my_pvp_matches(user_id: int) -> list[dict]:
@@ -191,7 +180,7 @@ def stats_for(user_id: int) -> dict:
     finally:
         conn.close()
     for game in per_game:
-        per_game[game]["history"] = rating_history(game, user_id)
+        per_game[game]["history"] = matches.rating_history(game, user_id, HISTORY_LIMIT)
     xp = xp_of(user_id)
     return {
         "xp": xp, "level": level_of(xp),
