@@ -30,6 +30,7 @@ from fastapi.staticfiles import StaticFiles
 from admin_routes import admin_router, router as ops_router
 from auth_routes import router as auth_router
 from game_routes import make_game_router
+from match_api import router as match_v2_router
 from openenv_native import make_openenv_app
 from matches_routes import ratings_router, router as match_router
 from matchmaking_routes import router as matchmaking_router
@@ -105,6 +106,9 @@ app.include_router(model_router)
 # v1 matches (PvP history + model-vs-model), see docs/design/03+04
 app.include_router(match_router)
 app.include_router(ratings_router)
+
+# v2 matches (design 17): one Match for PvE/PvP/spectate/replay, commands + SSE
+app.include_router(match_v2_router)
 
 # v1 quick matchmaking (06 §5 / v1.0-a M2)
 app.include_router(matchmaking_router)
@@ -227,6 +231,9 @@ try:
     ugc_store.ensure_schema()
     _seed_bundled_games()
     ugc_store.load_published_into_registry()
+    # 进行中的 v2 对局只在内存里（D12）：重启后标记为 aborted，而不是凭空消失
+    import matches as _match_records
+    _match_records.abort_unfinished_v2()
     import platform_api
     platform_api.ready()
 except Exception:

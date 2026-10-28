@@ -19,9 +19,9 @@ LAYERS = {
     "edge": {"main", "openenv_native", "platform_api", "game_routes", "api_limits",
              "api_schemas", "admin_routes", "auth_routes", "matches_routes",
              "matchmaking_routes", "model_routes", "play_routes", "social_routes",
-             "stats_routes", "ugc_routes"},
+             "stats_routes", "ugc_routes", "match_api"},
     "L3": {"auth", "social", "growth", "admin", "scores", "ugc", "ugc_assets"},
-    "L2": {"events", "sessions", "matches", "matchmaking", "models"},
+    "L2": {"events", "sessions", "matches", "matchmaking", "models", "match_engine"},
     "L1": {"registry", "ugc_runner", "ugc_worker", "ugc_sandbox", "ugc_proxy",
            "ugc_pack", "package_pipeline", "inference"},
 }

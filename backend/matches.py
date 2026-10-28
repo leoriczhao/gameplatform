@@ -9,6 +9,7 @@ Design: docs/design/03 + 04.
 """
 from __future__ import annotations
 
+import gzip
 import json
 import sqlite3
 import threading
@@ -63,7 +64,33 @@ def _db() -> sqlite3.Connection:
                PRIMARY KEY (game, user_id)
            )"""
     )
+    _ensure_v2_schema(conn)
     return conn
+
+
+# v2 对局（设计 17）：记录仍在 matches 表，创建即落库；uid 为对外 id（不可猜，
+# unlisted 凭链接可读的前提），座位进 match_seats。
+_V2_COLUMNS = {"uid": "TEXT", "mode": "TEXT", "visibility": "TEXT",
+               "version": "TEXT", "clock": "TEXT", "frames": "TEXT"}
+_V2_READY: set[str] = set()
+
+
+def _ensure_v2_schema(conn) -> None:
+    if str(SCORES_DB) in _V2_READY:
+        return
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(matches)")}
+    for col, kind in _V2_COLUMNS.items():
+        if col not in cols:
+            conn.execute(f"ALTER TABLE matches ADD COLUMN {col} {kind}")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_matches_uid ON matches(uid)")
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS match_seats (
+               match_id INTEGER NOT NULL, seat TEXT NOT NULL,
+               user_id INTEGER, controller TEXT NOT NULL,
+               PRIMARY KEY (match_id, seat))""")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_seats_user ON match_seats(user_id)")
+    conn.commit()
+    _V2_READY.add(str(SCORES_DB))
 
 
 def _row(row) -> dict:
@@ -138,6 +165,112 @@ def rating_history(game: str, user_id: int, limit: int = 50) -> list[dict]:
     finally:
         conn.close()
     return [{"rating": r[0], "created_at": r[1]} for r in reversed(rows)]
+
+
+# ------------------------------------------------------------- v2 records
+
+def insert_v2(uid: str, game: str, kind: str, version: str | None, mode: str,
+              visibility: str, clock: dict, players: list, models: list,
+              status: str, created_at: float) -> int:
+    conn = _db()
+    try:
+        cur = conn.execute(
+            "INSERT INTO matches (game, kind, players, models, status, created_at, "
+            "uid, mode, visibility, version, clock) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (game, kind, json.dumps(players), json.dumps(models), status, created_at,
+             uid, mode, visibility, version, json.dumps(clock)))
+        conn.commit()
+        return cur.lastrowid
+    finally:
+        conn.close()
+
+
+def update_v2(row_id: int, **fields) -> None:
+    """status / kind / players / models / result / finished_at / frames."""
+    allowed = {"status", "kind", "players", "models", "result", "finished_at", "frames"}
+    assert set(fields) <= allowed, set(fields) - allowed
+    values = [json.dumps(v) if k in ("players", "models", "result") else v
+              for k, v in fields.items()]
+    conn = _db()
+    try:
+        conn.execute(f"UPDATE matches SET {', '.join(f'{k}=?' for k in fields)} WHERE id=?",
+                     (*values, row_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def save_seats(row_id: int, seats: list[tuple[str, int | None, dict]]) -> None:
+    conn = _db()
+    try:
+        conn.execute("DELETE FROM match_seats WHERE match_id=?", (row_id,))
+        conn.executemany(
+            "INSERT INTO match_seats (match_id, seat, user_id, controller) VALUES (?,?,?,?)",
+            [(row_id, seat, uid, json.dumps(ctl)) for seat, uid, ctl in seats])
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_v2(uid: str) -> dict | None:
+    """One v2 match record with its seats, or None."""
+    conn = _db()
+    try:
+        row = conn.execute(
+            "SELECT id, game, kind, players, models, status, result, created_at, "
+            "finished_at, uid, mode, visibility, version, clock, frames "
+            "FROM matches WHERE uid=?", (uid,)).fetchone()
+        if row is None:
+            return None
+        seats = conn.execute(
+            "SELECT seat, user_id, controller FROM match_seats WHERE match_id=? "
+            "ORDER BY seat", (row[0],)).fetchall()
+    finally:
+        conn.close()
+    return {"row_id": row[0], "game": row[1], "kind": row[2],
+            "players": json.loads(row[3] or "[]"), "models": json.loads(row[4] or "[]"),
+            "status": row[5], "result": json.loads(row[6]) if row[6] else None,
+            "created_at": row[7], "finished_at": row[8], "uid": row[9], "mode": row[10],
+            "visibility": row[11], "version": row[12],
+            "clock": json.loads(row[13]) if row[13] else None, "frames": row[14],
+            "seats": [{"seat": s, "user_id": u, "controller": json.loads(c)}
+                      for s, u, c in seats]}
+
+
+def frames_path(uid: str) -> Path:
+    return SCORES_DB.parent / "replays" / f"{uid}.jsonl.gz"
+
+
+def write_frames(uid: str, frames: list[dict]) -> str:
+    """Seal a finished match's frames: one JSON object per line, gzip."""
+    path = frames_path(uid)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    with gzip.open(tmp, "wt", encoding="utf-8") as fh:
+        for frame in frames:
+            fh.write(json.dumps(frame, ensure_ascii=False, separators=(",", ":")) + "\n")
+    tmp.replace(path)
+    return str(path)
+
+
+def read_frames(path: str) -> list[dict]:
+    with gzip.open(path, "rt", encoding="utf-8") as fh:
+        return [json.loads(line) for line in fh if line.strip()]
+
+
+def abort_unfinished_v2(cause: str = "server_restart") -> int:
+    """Live v2 matches exist only in memory (D12): on boot they are gone, so
+    their rows become aborted instead of silently disappearing."""
+    conn = _db()
+    try:
+        cur = conn.execute(
+            "UPDATE matches SET status='aborted', result=?, finished_at=? "
+            "WHERE uid IS NOT NULL AND status IN ('waiting', 'active')",
+            (json.dumps({"winner": None, "cause": cause}), time.time()))
+        conn.commit()
+        return cur.rowcount
+    finally:
+        conn.close()
 
 
 # ----------------------------------------------------------------- records

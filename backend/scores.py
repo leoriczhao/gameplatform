@@ -11,6 +11,9 @@ import sqlite3
 import time
 from pathlib import Path
 
+import events
+import registry
+
 SCORES_DB = Path(os.environ.get("SCORES_DB", "/data/scores.db"))
 
 
@@ -106,3 +109,29 @@ def submit(game_id: str, name: str, score: int, mode: str,
         conn.close()
     return {"id": score_id, "rank": rank, "name": name[:24],
             "score": score, "mode": mode or "human", "match_id": match_id}
+
+
+# ------------------------------------------------- v2: server-side entries (17)
+
+def _on_match_finished(payload) -> None:
+    """A finished v2 practice match enters the board by itself: the server
+    already knows the score, so clients no longer submit one. Resigned games
+    and scores outside the game's declared bounds stay off the board."""
+    if not isinstance(payload, dict) or payload.get("kind") != "pve":
+        return
+    if payload.get("cause") == "resigned" or payload.get("score") is None \
+            or not payload.get("players"):
+        return
+    score = int(payload["score"])
+    adapter = registry.GAMES.get(payload["game"])
+    if adapter is not None:
+        lo, hi = adapter.score_bounds
+        if not lo <= score <= hi:
+            return
+    player = payload["players"][0]
+    submit(payload["game"], player["name"], score,
+           "custom" if payload.get("assisted") else "human",
+           user_id=player["user_id"], match_id=payload["match_id"])
+
+
+events.subscribe("match_finished", _on_match_finished)

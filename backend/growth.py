@@ -114,8 +114,27 @@ def award_pve(sess) -> None:
         award_xp(uid, sess.game, "pve_win", XP_PVE_WIN)
 
 
-def _on_match_finished(sess) -> None:
-    award_pvp(sess) if sess.kind == "pvp" else award_pve(sess)
+def _on_match_finished(payload) -> None:
+    if not isinstance(payload, dict):   # v1 play session (removed at the v2 cutover)
+        award_pvp(payload) if payload.kind == "pvp" else award_pve(payload)
+        return
+    game, winner = payload["game"], payload["winner"]
+    if payload["kind"] == "pvp":
+        for p in payload["players"]:
+            award_xp(p["user_id"], game, "pvp_play", XP_PVP_PLAY)
+            if winner == p["seat"]:
+                award_xp(p["user_id"], game, "pvp_win", XP_PVP_WIN)
+    elif payload["kind"] == "pve" and payload["players"]:
+        p = payload["players"][0]
+        award_xp(p["user_id"], game, "pve_finish", XP_PVE_FINISH)
+        if winner == p["seat"]:
+            award_xp(p["user_id"], game, "pve_win", XP_PVE_WIN)
+
+
+def _winner_seat(result: dict) -> str | None:
+    """v2 records store the winning seat ("p1"); v1 records the side index."""
+    winner = result.get("winner")
+    return winner if winner is None or isinstance(winner, str) else f"p{winner}"
 
 
 events.subscribe("match_finished", _on_match_finished)
@@ -139,8 +158,8 @@ def _my_pvp_matches(user_id: int) -> list[dict]:
         if not sides:
             continue
         side = sides[0].get("side")
-        winner = result.get("winner")
-        won = None if winner is None else (f"p{winner}" == side)
+        winner = _winner_seat(result)
+        won = None if winner is None else (winner == side)
         out.append({"id": r[0], "game": r[1], "side": side,
                     "won": won, "result": result,
                     "created_at": r[4], "finished_at": r[5] or r[4]})
@@ -232,14 +251,14 @@ def weekly_board(game: str, days: int = 7, limit: int = 50) -> list[dict]:
     for players_raw, result_raw in rows:
         players = json.loads(players_raw or "[]")
         result = json.loads(result_raw) if result_raw else {}
-        winner = result.get("winner")
+        winner = _winner_seat(result)
         for p in players:
             uid = p.get("user_id")
             if uid is None:
                 continue
             a = agg.setdefault(uid, {"games": 0, "wins": 0})
             a["games"] += 1
-            if winner is not None and p.get("side") == f"p{winner}":
+            if winner is not None and p.get("side") == winner:
                 a["wins"] += 1
     for uid, xp in xp_rows:
         agg.setdefault(uid, {"games": 0, "wins": 0})["xp"] = int(xp or 0)

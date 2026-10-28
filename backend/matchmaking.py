@@ -13,6 +13,7 @@ from __future__ import annotations
 import threading
 import time
 
+import match_engine
 import matches as match_store
 import sessions
 from registry import GAMES
@@ -33,10 +34,11 @@ def _now() -> float:
 
 
 class QueueEntry:
-    def __init__(self, game: str, mode: str, principal: dict):
+    def __init__(self, game: str, mode: str, principal: dict, api: str = "v1"):
         self.game = game
         self.mode = mode
         self.principal = principal
+        self.api = api   # v1: pairs into a play session; v2: into a Match (design 17)
         self.enqueued_at = _now()
         self.matched_at = 0.0
         self.room_id: str | None = None
@@ -61,7 +63,7 @@ def _band_for(entry: QueueEntry) -> float:
     return min(band, BAND_MAX)
 
 
-def join_queue(game: str, principal: dict, mode: str) -> QueueEntry:
+def join_queue(game: str, principal: dict, mode: str, api: str = "v1") -> QueueEntry:
     """Enter the queue for (game, mode); re-enqueueing updates the mode.
     Raises ValueError / PermissionError."""
     if not principal.get("id"):
@@ -77,7 +79,7 @@ def join_queue(game: str, principal: dict, mode: str) -> QueueEntry:
             _QUEUES[key] = [e for e in _QUEUES[key]
                             if not (e.game == game
                                     and e.principal["id"] == principal["id"])]
-        entry = QueueEntry(game, mode, principal)
+        entry = QueueEntry(game, mode, principal, api)
         _QUEUES.setdefault((game, mode), []).append(entry)
     try_match()
     return entry
@@ -117,20 +119,22 @@ def queue_status(game: str, principal: dict) -> dict:
                 break
         if entry is None:
             return {"queued": False, "matched": False, "mode": None,
-                    "position": None, "wait_seconds": 0, "session_id": None}
+                    "position": None, "wait_seconds": 0, "session_id": None,
+                    "match_id": None}
         if entry.room_id:
             # idempotent: the matched room id stays readable until the user
             # re-queues (replaces the entry), cancels, or the entry expires
             return {"queued": False, "matched": True, "mode": entry.mode,
                     "position": None, "wait_seconds": int(now - entry.enqueued_at),
-                    "session_id": entry.room_id}
+                    "session_id": entry.room_id,
+                    "match_id": entry.room_id if entry.api == "v2" else None}
         q = _QUEUES[(game, entry.mode)]
         waiting = [e for e in q if e.room_id is None]
         position = waiting.index(entry) + 1
         return {"queued": True, "matched": False, "mode": entry.mode,
                 "position": position,
                 "wait_seconds": int(now - entry.enqueued_at),
-                "session_id": None}
+                "session_id": None, "match_id": None}
 
 
 def _expire(now: float) -> None:
@@ -166,10 +170,11 @@ def _find_pairs() -> list[tuple[str, str, QueueEntry, QueueEntry]]:
                     e1 = q[j]
                     if e1.room_id or e1.matched_at:
                         continue
-                    if e0.principal["id"] == e1.principal["id"]:
+                    if e0.principal["id"] == e1.principal["id"] or e0.api != e1.api:
                         continue
-                    if sessions.has_active_pvp_pair(
-                            game, e0.principal["id"], e1.principal["id"]):
+                    busy = (match_engine.has_live_pair if e0.api == "v2"
+                            else sessions.has_active_pvp_pair)
+                    if busy(game, e0.principal["id"], e1.principal["id"]):
                         continue
                     if abs(get_rating(game, e0.principal["id"])
                            - get_rating(game, e1.principal["id"]))                             > min(band0, _band_for(e1)):
@@ -184,6 +189,16 @@ def _find_pairs() -> list[tuple[str, str, QueueEntry, QueueEntry]]:
 def _pair_rooms(pairs) -> None:
     """Create the internal PvP rooms for matched pairs (M1 rooms)."""
     for game, mode, e0, e1 in pairs:
+        if e0.api == "v2":
+            try:
+                room = match_engine.create_paired(game, mode, e0.principal, e1.principal).uid
+            except match_engine.MatchError:
+                with _LOCK:
+                    e0.matched_at = e1.matched_at = 0.0
+                continue
+            with _LOCK:
+                e0.room_id = e1.room_id = room
+            continue
         try:
             sess = sessions.create_pvp_session(
                 game, e0.principal, None, None, mode=mode,
