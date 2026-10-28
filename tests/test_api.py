@@ -87,7 +87,7 @@ def test_snake_openenv_info_and_roundtrip():
     with client.websocket_connect("/api/openenv/snake/ws") as ws:
         data = ws_reset(ws, seed=42, obs_mode="grid", include_state=True)
         obs = data["observation"]
-        assert obs["state"]["seed"] == 42
+        assert obs["state"]["_seed"] == 42
         assert obs["type"] == "tensor" and obs["shape"] == [3, 22, 22]
         assert obs["dtype"] == "float32"
         assert len(obs["data"]) == 3 and len(obs["data"][0]) == 22
@@ -129,8 +129,8 @@ def test_independent_openenv_sessions_with_custom_rewards():
         s1 = ws_reset(ws1, seed=1, obs_mode="state", rewards=rewards)
         s2 = ws_reset(ws2, seed=2, obs_mode="state", rewards=rewards)
         assert s1["observation"]["type"] == s2["observation"]["type"] == "state"
-        assert s1["observation"]["state"]["seed"] == 1
-        assert s2["observation"]["state"]["seed"] == 2
+        assert s1["observation"]["state"]["_seed"] == 1
+        assert s2["observation"]["state"]["_seed"] == 2
         first = ws_step(ws1, 0)
         assert ws_state(ws2)["game_state"] == s2["observation"]["state"]
         second = ws_step(ws2, 2)

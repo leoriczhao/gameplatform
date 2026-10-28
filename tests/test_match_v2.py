@@ -91,7 +91,7 @@ def test_practice_match_plays_settles_records_and_seals_frames():
     assert (m["status"], m["kind"], m["mode"], m["visibility"]) == \
         ("active", "pve", "practice", "unlisted")
     assert m["you"]["seat"] == "p0" and m["to_act"] == ["p0"] and m["deadline_at"] is None
-    assert m["frame"]["seed"] == 3
+    assert "_seed" not in m["frame"]   # private keys stay on the server while live
 
     r = _act(u, mid, 5, 1)
     assert r.status_code == 409 and r.json()["detail"]["code"] == "stale_tick"
@@ -112,14 +112,22 @@ def test_practice_match_plays_settles_records_and_seals_frames():
     frames = client.get(f"/api/v2/matches/{mid}/frames?from=0&limit=3", headers=u["h"]).json()
     assert [f["tick"] for f in frames["frames"]] == [0, 1, 2] and frames["total"] == tick + 1
     assert frames["frames"][1]["actions"] == {"p0": 1}
+    assert frames["frames"][0]["frame"]["_seed"] == 3   # finished: the full state is public
 
     rec = store.get_v2(mid)
     assert rec["status"] == "finished" and rec["kind"] == "pve" and Path(rec["frames"]).exists()
     assert rec["seats"] == [{"seat": "p0", "user_id": u["user"]["id"],
                              "controller": {"type": "human"}}]
     # the board entry comes from the server, not from the client
+    # a chosen seed can be searched offline, so that run stays off the board
     board = client.get("/api/snake/scores?limit=50").json()["items"]
-    assert any(i["name"] == u["user"]["username"] for i in board)
+    assert not any(i["name"] == u["user"]["username"] for i in board)
+    fresh, t = _create(u, game="snake")["id"], 0
+    while _view(u, fresh)["status"] == "active":
+        _act(u, fresh, t, 1)
+        t += 1
+    board = client.get("/api/snake/scores?limit=50").json()["items"]
+    assert any(i["name"] == u["user"]["username"] for i in board)   # entered by the server
 
     # evicted from memory: snapshot and frames come from the record + sealed file
     engine.LIVE.pop(mid)
@@ -160,7 +168,8 @@ def test_model_autopilot_and_model_vs_ai():
     m = _create(u, game="snake", seats=[{"seat": "p0", "occupant": "me",
                                          "controller": {"type": "model", "model_id": snake_model}}])
     assert m["seats"][0]["controller"]["type"] == "model"
-    assert _wait(lambda: _view(u, m["id"])["status"] == "finished", timeout=30)
+    assert _wait(lambda: _view(u, m["id"])["tick"] >= 3)   # the model drives my seat
+    client.post(f"/api/v2/matches/{m['id']}/resign", headers=u["h"])
     rec = store.get_v2(m["id"])
     assert rec["models"][0]["model_id"] == snake_model
 
@@ -313,3 +322,115 @@ def test_sweep_cancels_unjoined_rooms_and_aborts_idle_matches():
     engine.sweep(now=time.time() + engine.WAITING_TTL + 1)
     assert _view(a, room)["status"] == "cancelled"
     assert _view(a, idle)["status"] == "aborted" and _view(a, idle)["result"]["cause"] == "idle"
+
+
+# ------------------------------------------------------------------ M2 contract
+
+DUEL_YAML = """slug: duel-test
+title: 轮流出牌
+description: 双人轮流出牌，测试 to_act / view 钩子与 game.yaml 时钟
+version: 1.0.0
+seats: 2
+clock: { kind: turn, move_timeout_s: 5, on_timeout: forfeit, max_timeouts: 1 }
+pvp: { enabled: true, action: unit }
+board:
+  width: 2
+  height: 1
+  palette:
+    empty: { glyph: "·" }
+"""
+
+DUEL_CODE = '''
+class Duel:
+    def info(self):
+        return {"grid": [2, 1], "action_space": "choice"}
+    def new_state(self, seed, options=None):
+        return {"tick": 0, "turn": 0, "done": False, "winner": None, "cause": None,
+                "hands": {"p0": [1, 2], "p1": [3, 4]}, "played": [],
+                "_deck": [seed, seed + 1], "board": [["empty", "empty"]]}
+    def to_act(self, state):
+        return ["p0"] if state["turn"] == 0 else ["p1"]
+    def view(self, state, seat):
+        hands = {s: (h if s == seat else len(h)) for s, h in state["hands"].items()}
+        return {**state, "hands": hands}
+    def validate_state(self, state):
+        pass
+    def validate_action(self, action, state=None):
+        seat = "p0" if state["turn"] == 0 else "p1"
+        if not isinstance(action, dict) or action.get(seat) not in (0, 1):
+            raise ValueError("pick card 0 or 1")
+    def step_state(self, state, action):
+        seat = "p0" if state["turn"] == 0 else "p1"
+        pick = action.get(seat) if isinstance(action, dict) else 0
+        pick = pick if pick in (0, 1) else 0
+        tick = state["tick"] + 1
+        done = tick >= 4
+        return {**state, "tick": tick, "turn": 1 - state["turn"],
+                "played": state["played"] + [[seat, pick]],
+                "done": done, "winner": 0 if done else None, "cause": "done" if done else None}
+    def sample_action(self, state):
+        return {"p0": 0, "p1": 0}
+def get_adapter():
+    return Duel()
+'''
+
+
+@pytest.fixture(scope="module")
+def duel_game():
+    import io
+    import zipfile
+    import admin as admin_store
+    os.environ["ADMIN_USERNAME"], os.environ["ADMIN_PASSWORD"] = "mv2admin", "adminsecret1"
+    admin_store.bootstrap_admin()
+    admin = client.post("/api/v1/auth/login",
+                        json={"username": "mv2admin", "password": "adminsecret1"}).json()
+    author = _user("duelist")
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("game.yaml", DUEL_YAML)
+        zf.writestr("__init__.py", DUEL_CODE)
+    r = client.post("/api/v1/ugc/games", headers=author["h"], data={"changelog": "init"},
+                    files={"file": ("duel.zip", buf.getvalue(), "application/zip")})
+    assert r.status_code == 200, r.text
+    gid = r.json()["game"]["id"]
+    assert client.post(f"/api/v1/ugc/games/{gid}/submit", headers=author["h"]).status_code == 200
+    r = client.post(f"/api/v1/admin/ugc/{gid}/approve",
+                    headers={"Authorization": f"Bearer {admin['token']}"})
+    assert r.status_code == 200, r.text
+    yield "duel-test"
+    # leave the shared registry as other modules expect it (official games only)
+    assert client.post(f"/api/v1/ugc/games/{gid}/unpublish", headers=author["h"]).status_code == 200
+
+
+def test_contract_clock_to_act_and_views(duel_game):
+    a, b, c = _user(), _user(), _user()
+    room = _create(a, game=duel_game, seats=[
+        {"seat": "p0", "occupant": "me", "controller": {"type": "human"}},
+        {"seat": "p1", "occupant": None, "controller": {"type": "human"}}])
+    mid = room["id"]
+    assert room["clock"] == {"kind": "turn", "move_timeout_s": 5, "on_timeout": "forfeit",
+                             "max_timeouts": 1}
+    client.post(f"/api/v2/matches/{mid}/seats/p1/join", json={}, headers=b["h"])
+
+    va, vb, vc = _view(a, mid), _view(b, mid), _view(c, mid)
+    assert va["to_act"] == ["p0"] and va["deadline_at"] is not None
+    assert va["frame"]["hands"] == {"p0": [1, 2], "p1": 2}      # the view hook
+    assert vb["frame"]["hands"] == {"p0": 2, "p1": [3, 4]}
+    assert vc["frame"]["hands"] == {"p0": 2, "p1": 2}           # spectator
+    assert all("_deck" not in v["frame"] for v in (va, vb, vc))  # private keys
+
+    r = _act(b, mid, 0, 0)
+    assert r.status_code == 403 and r.json()["detail"]["code"] == "not_to_act"
+    assert _act(a, mid, 0, 1).status_code == 202   # each seat sends its own action
+    v = _view(b, mid)
+    assert v["tick"] == 1 and v["to_act"] == ["p1"] and v["frame"]["played"] == [["p0", 1]]
+    live = client.get(f"/api/v2/matches/{mid}/frames", headers=c["h"]).json()["frames"]
+    assert live[0]["frame"]["hands"] == {"p0": 2, "p1": 2} and "_deck" not in live[0]["frame"]
+
+    for tick, who in enumerate([b, a, b], start=1):
+        assert _act(who, mid, tick, 0).status_code == 202
+    done = _view(c, mid)
+    assert done["status"] == "finished" and done["result"]["winner"] == "p0"
+    sealed = client.get(f"/api/v2/matches/{mid}/frames", headers=c["h"]).json()["frames"]
+    assert sealed[0]["frame"]["hands"] == {"p0": [1, 2], "p1": [3, 4]}   # revealed after the end
+    assert "_deck" in sealed[0]["frame"]

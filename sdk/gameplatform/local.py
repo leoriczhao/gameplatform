@@ -255,6 +255,7 @@ class LocalVecEnv:
         self.states: list[dict] | None = None
         self._last_obs = None
         self._episode_seeds = [int(seed) + i for i in range(self.n)]
+        self.current_seeds: list[int | None] = [None] * self.n  # seed of each slot's episode
         self._dones = np.zeros(self.n, dtype=bool)
         self._obs_fn = make_obs_fn(self.game, obs_mode, R)
         if obs_mode != "state" and not self._wants_server_obs() and self._obs_fn is None:
@@ -272,6 +273,7 @@ class LocalVecEnv:
 
     def _reset_one(self, i: int) -> dict:
         state = self._episodes[i].reset(self._episode_seeds[i], self.new_options)
+        self.current_seeds[i] = self._episode_seeds[i]
         self._episode_seeds[i] += EPISODE_SEED_STRIDE
         return state
 

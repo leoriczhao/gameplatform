@@ -89,7 +89,7 @@ def test_gym_seed_and_terminal_observation(base_url, backend, tmp_path, monkeypa
     env = PlatformEnv(game="snake", obs_mode="grid", base_url=base_url, backend=backend)
     try:
         first, info = env.reset(seed=0)
-        assert info["state"]["seed"] == 0
+        assert info["seed"] == 0 and info["state"]["_seed"] == 0
         np.testing.assert_array_equal(first, env.reset(seed=0)[0])
         for _ in range(30):
             obs, _, done, _, info = env.step(np.int64(1))
@@ -99,7 +99,7 @@ def test_gym_seed_and_terminal_observation(base_url, backend, tmp_path, monkeypa
                 with pytest.raises(RuntimeError, match="call reset"):
                     env.step(1)
                 _, reset_info = env.reset()
-                assert reset_info["state"]["seed"] == 100003
+                assert reset_info["seed"] == 100003
                 assert not reset_info["state"]["done"]
                 break
         else:
@@ -315,7 +315,7 @@ def test_live_raw_state_modes_and_socket_cleanup(base_url, mode, shape):
         assert env.info["max_concurrent_envs"] == 64
         if shape:
             assert env._last_obs.shape == shape
-        assert [s["seed"] for s in env.states] == [42, 43]
+        assert [s["_seed"] for s in env.states] == [42, 43]
         env.step(np.array([1, 1]))
         for i, client in enumerate(clients):
             state = client.state()

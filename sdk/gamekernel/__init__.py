@@ -9,6 +9,6 @@ Every dependency is imported at module level. The sandbox worker imports the
 kernel before it confines the filesystem, after which the kernel's own files
 are no longer readable.
 """
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
-from . import calls, episode, loader, manifest, models, scan  # noqa: F401
+from . import calls, episode, loader, manifest, models, scan, views  # noqa: F401

@@ -30,6 +30,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 import httpx
 
+from gamekernel.views import strip_private
+
 import events
 import inference
 import matches as store
@@ -40,9 +42,10 @@ log = logging.getLogger(__name__)
 
 SEATS = ("p0", "p1")
 TERMINAL = ("finished", "cancelled", "aborted")
-# Human-vs-human time control until game.yaml declares clocks (design 17 M2).
+# Human-vs-human time control for packages whose game.yaml declares no clock.
 PVP_MOVE_TIMEOUT_S = 60.0
 PVP_MAX_TIMEOUTS = 5
+VIEW_CACHE_TICKS = 4      # per-seat views kept for recent ticks (view-hook games)
 AUTOPLAY_PACE_S = 0.25    # server seat of a human occupant (autopilot): watchable
 BURST_TICKS = 50          # all-server matches: ticks per scheduler turn (fairness)
 TICK_CAP = 5000           # engines that never finish end in a draw here
@@ -147,7 +150,8 @@ class Seat:
 
 class Match:
     def __init__(self, *, game: str, adapter, seats: list[Seat], kind: str, mode: str,
-                 visibility: str, creator_id: int | None, seed: int, clock: dict):
+                 visibility: str, creator_id: int | None, seed: int, clock: dict,
+                 seeded: bool = False):
         self.uid = secrets.token_hex(6)
         self.game = game
         self.adapter = adapter
@@ -158,6 +162,7 @@ class Match:
         self.invite = _invite_code() if visibility == "private" else None
         self.creator_id = creator_id
         self.seed = seed
+        self.seeded = seeded   # a chosen seed is reproducible, so it never ranks
         self.clock = clock
         self.options = getattr(adapter, "pvp_options", None) if len(seats) == 2 else None
         self.empty_action = getattr(adapter, "pvp_empty_action", [])
@@ -177,6 +182,7 @@ class Match:
         self.finished_at: float | None = None
         self.row_id: int | None = None
         self.presence: dict[int, int] = {}
+        self._views: dict[tuple[int, str | None], dict] = {}
         self.viewers = 0
         self.lock = threading.RLock()
         self.log = EventLog()
@@ -201,6 +207,28 @@ class Match:
             return "empty"
         return "online" if self.presence.get(s.occupant["user_id"]) else "offline"
 
+    def frame_for(self, frame: dict, tick: int, seat: str | None) -> dict:
+        """The viewer's share of a state: private ("_") keys and whatever the
+        package's view hook hides stay on the server until the match ends."""
+        if self.status in TERMINAL or frame is None:
+            return frame
+        if "view" not in (getattr(self.adapter, "hooks", None) or ()):
+            return strip_private(frame)
+        key = (tick, seat)
+        if key not in self._views:
+            if len(self._views) > VIEW_CACHE_TICKS * (len(self.seats) + 1):
+                horizon = self.tick - VIEW_CACHE_TICKS
+                self._views = {k: v for k, v in self._views.items() if k[0] > horizon}
+            self._views[key] = self.adapter.view(frame, seat)
+        return self._views[key]
+
+    def frames_for(self, start: int, limit: int, user_id=None) -> tuple[list[dict], int]:
+        with self.lock:
+            seat = self.seat_of(user_id)
+            page = [{**f, "frame": self.frame_for(f["frame"], f["tick"], seat)}
+                    for f in self.frames[start:start + limit]]
+            return page, len(self.frames)
+
     def _seat_view(self, s: Seat) -> dict:
         return {"seat": s.seat, "occupant": s.occupant, "controller": s.public_controller(),
                 "presence": self._presence(s), "submitted": s.seat in self.pending,
@@ -216,7 +244,8 @@ class Match:
                 "invite": self.invite if you else None, "clock": self.clock,
                 "status": self.status, "result": self.result,
                 "seats": [self._seat_view(s) for s in self.seats.values()],
-                "you": {"seat": you}, "tick": self.tick, "frame": self.state,
+                "you": {"seat": you}, "tick": self.tick,
+                "frame": self.frame_for(self.state, self.tick, you),
                 "events": self.state.get("events", []), "to_act": list(self.to_act),
                 "deadline_at": self.deadline_at, "rematch": self.rematch,
                 "frames": len(self.frames), "created_at": self.created_at,
@@ -253,7 +282,14 @@ class Match:
         self._open_tick()
 
     def _open_tick(self) -> None:
-        self.to_act = list(self.seats)
+        seats = tuple(self.seats)
+        try:
+            self.to_act = (self.adapter.to_act(self.state, seats)
+                           if hasattr(self.adapter, "to_act") else list(seats))
+        except Exception as e:
+            log.exception("match %s: to_act failed", self.uid)
+            self._abort("engine_error", detail=f"to_act: {type(e).__name__}: {e}")
+            return
         self.pending = {}
         humans = [s for s in self.to_act if self.seats[s].human]
         timeout = self.clock.get("move_timeout_s")
@@ -302,9 +338,10 @@ class Match:
         """Every seat in to_act has an action (or gets one now): advance one tick."""
         actions = {}
         try:
-            for seat in self.to_act:
+            for seat in self.seats:   # seats not to act this tick pass with the empty action
                 actions[seat] = (self.pending[seat] if seat in self.pending
-                                 else self._server_action(seat))
+                                 else self._server_action(seat) if seat in self.to_act
+                                 else self.empty_action)
             nxt = self.adapter.step_state(self.state, self._combine(actions))
         except Exception as e:
             log.exception("match %s: engine failure", self.uid)
@@ -329,6 +366,8 @@ class Match:
             self._finish(None, "tick_cap")
             return
         self._open_tick()
+        if self.status != "active":
+            return   # to_act failed: the abort is already announced
         self.log.append("tick", **frame, to_act=list(self.to_act),
                         deadline_at=self.deadline_at)
 
@@ -338,7 +377,8 @@ class Match:
                 "winner": self.result["winner"], "cause": self.result["cause"],
                 "players": [{"user_id": p["user_id"], "seat": p["side"], "name": p["name"]}
                             for p in self._players()],
-                "score": self.state.get("score"), "assisted": self.assisted}
+                "score": self.state.get("score"), "assisted": self.assisted,
+                "seeded": self.seeded}
 
     def _seal(self) -> None:
         try:
@@ -690,22 +730,35 @@ def _checked_controller(adapter, game: str, c, principal: dict, *, own_seat: boo
 
 
 def seat_count(adapter) -> int:
+    declared = (getattr(adapter, "meta", None) or {}).get("seats")
+    if declared:
+        return int(declared)
     return 2 if (getattr(adapter, "pvp_enabled", False)
                  or getattr(adapter, "opponents", None)) else 1
 
 
+def clock_for(adapter, kind: str) -> dict:
+    """The package's declared clock, else the platform default. Move deadlines
+    bind only when one human's delay holds up another human (kind pvp)."""
+    declared = (getattr(adapter, "meta", None) or {}).get("clock")
+    clock = dict(declared) if declared else {
+        "kind": "turn", "move_timeout_s": PVP_MOVE_TIMEOUT_S, "on_timeout": "empty",
+        "max_timeouts": PVP_MAX_TIMEOUTS}
+    if kind != "pvp":
+        clock["move_timeout_s"] = None
+    return clock
+
+
 def _create(game, adapter, seats: list[Seat], *, kind, mode, visibility, creator_id,
-            seed) -> Match:
+            seed, seeded: bool = False) -> Match:
     for s in seats:
         if s.occupant:
             _check_capacity(s.occupant["user_id"])
-    humans_vs = kind == "pvp"
-    clock = {"kind": "turn",
-             "move_timeout_s": PVP_MOVE_TIMEOUT_S if humans_vs else None,
-             "on_timeout": "empty", "max_timeouts": PVP_MAX_TIMEOUTS if humans_vs else None}
+    clock = clock_for(adapter, kind)
     try:
         m = Match(game=game, adapter=adapter, seats=seats, kind=kind, mode=mode,
-                  visibility=visibility, creator_id=creator_id, seed=seed, clock=clock)
+                  visibility=visibility, creator_id=creator_id, seed=seed, clock=clock,
+                  seeded=seeded)
     except (ValueError, TypeError) as e:
         raise MatchError(400, "bad_settings", f"开局失败：{e}")
     m.row_id = store.insert_v2(m.uid, game, kind, m.version, mode, visibility, clock,
@@ -779,7 +832,8 @@ def create_match(principal: dict, spec: dict) -> Match:
     if not isinstance(settings, dict) or set(settings) - {"seed"}:
         raise MatchError(400, "bad_settings", "settings 目前只支持 seed")
     return _create(game, adapter, seats, kind=kind, mode=mode, visibility=visibility,
-                   creator_id=principal["id"], seed=_new_seed(settings.get("seed")))
+                   creator_id=principal["id"], seed=_new_seed(settings.get("seed")),
+                   seeded=settings.get("seed") is not None)
 
 
 def create_paired(game: str, mode: str, first: dict, second: dict) -> Match:

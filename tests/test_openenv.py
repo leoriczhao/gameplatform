@@ -299,7 +299,7 @@ def test_mcp_stateful_session_plays_the_game():
         r = _mcp("tools/call", {"name": "new_episode",
                                 "arguments": {"seed": 7},
                                 "session_id": sid})["result"]
-        assert r["state"]["seed"] == 7 and r["step_count"] == 0
+        assert r["state"]["_seed"] == 7 and r["step_count"] == 0
         r = _mcp("tools/call", {"name": "act", "arguments": {"action": 1},
                                 "session_id": sid})["result"]
         assert r["state"]["tick"] == 1 and r["step_count"] == 1

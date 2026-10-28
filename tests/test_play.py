@@ -42,7 +42,7 @@ def _leave(game, sid):
 def test_snake_session_lifecycle():
     s = _create("snake", seed=42)
     assert s["status"] == "active" and s["tick"] == 0
-    assert s["state"]["seed"] == 42
+    assert s["state"]["_seed"] == 42
 
     r = client.post(f"/api/v1/snake/play/sessions/{s['id']}/actions",
                     json={"actions": 1}, headers=USER_HEADERS)

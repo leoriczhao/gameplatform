@@ -141,17 +141,17 @@ def snapshot(uid: str, request: Request) -> dict:
 @router.get("/api/v2/matches/{uid}/frames", summary="帧历史（时间线 / 回放）")
 def frames(uid: str, request: Request, start: int = Query(0, ge=0, alias="from"),
            limit: int = Query(FRAMES_PAGE, ge=1, le=FRAMES_PAGE)):
-    m, rec = _readable(uid, principal_from_request(request))
-    if m is not None:
-        with m.lock:
-            all_frames, sealed, visibility = list(m.frames), False, m.visibility
+    principal = principal_from_request(request)
+    m, rec = _readable(uid, principal)
+    if m is not None:   # live: each frame as this viewer may see it (17 §4.3)
+        page, total = m.frames_for(start, limit, principal.get("id"))
+        sealed, visibility = False, m.visibility
     else:
         all_frames = store.read_frames(rec["frames"]) if rec.get("frames") else []
+        page, total = all_frames[start:start + limit], len(all_frames)
         sealed, visibility = True, rec["visibility"]
-    page = all_frames[start:start + limit]
     nxt = start + len(page)
-    body = {"frames": page, "next": nxt if nxt < len(all_frames) else None,
-            "total": len(all_frames)}
+    body = {"frames": page, "next": nxt if nxt < total else None, "total": total}
     headers = ({"Cache-Control": "public, max-age=86400"}
                if sealed and visibility != "private" else {"Cache-Control": "no-store"})
     return JSONResponse(body, headers=headers)
@@ -178,6 +178,13 @@ async def stream(uid: str, request: Request, since: int | None = Query(None, ge=
         return StreamingResponse(once(), media_type="text/event-stream",
                                  headers={"Cache-Control": "no-cache"})
 
+    def shaped(event: dict) -> str:
+        if event["type"] == "tick":   # the viewer's share of the new frame
+            with m.lock:
+                seat = m.seat_of(user_id)
+                event = {**event, "frame": m.frame_for(event["frame"], event["tick"], seat)}
+        return _sse(event)
+
     async def events():
         loop = asyncio.get_running_loop()
         wake = asyncio.Event()
@@ -193,7 +200,7 @@ async def stream(uid: str, request: Request, since: int | None = Query(None, ge=
             else:
                 for e in backlog:
                     pos = e["seq"]
-                    yield _sse(e)
+                    yield await run_in_threadpool(shaped, e)
             while engine.get_live(uid) is m:
                 if await request.is_disconnected():
                     break
@@ -211,7 +218,7 @@ async def stream(uid: str, request: Request, since: int | None = Query(None, ge=
                     continue
                 for e in items:
                     pos = e["seq"]
-                    yield _sse(e)
+                    yield await run_in_threadpool(shaped, e)
         finally:
             # Synchronous on purpose: after a client disconnect the stream is
             # cancelled, and anyio cancels every later await in this block too.

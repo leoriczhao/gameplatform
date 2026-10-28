@@ -8,7 +8,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "sdk"))
 
-from gamekernel import calls, episode, loader, models  # noqa: E402
+from gamekernel import calls, episode, loader, manifest, models  # noqa: E402
 
 
 class OldStep:
@@ -122,4 +122,41 @@ def test_loader_requires_get_adapter(tmp_path):
     with pytest.raises(loader.PackageError, match="get_adapter"):
         loader.load_package(tmp_path, module_name="_kernel_test_pkg")
     adapter = loader.load_package(ROOT / "packaged-games" / "snake", "_kernel_test_snake")
-    assert adapter.new_state(1)["seed"] == 1
+    assert adapter.new_state(1)["_seed"] == 1
+
+
+def test_manifest_clock_and_seats():
+    base = {"slug": "clock-x", "title": "t", "description": "d", "version": "1.0.0",
+            "board": {"width": 1, "height": 1, "palette": {"empty": {"glyph": "."}}}}
+    ok = manifest.validate_meta({**base, "seats": 2, "clock": {"move_timeout_s": 30}})
+    assert ok["seats"] == 2 and ok["clock"] == {"kind": "turn", "move_timeout_s": 30,
+                                                "on_timeout": "empty", "max_timeouts": 5}
+    bad = [({"seats": 3}, "seats"), ({"clock": {"kind": "realtime"}}, "暂未开放"),
+           ({"clock": {"on_timeout": "skip"}}, "on_timeout"),
+           ({"clock": {"move_timeout_s": 1}}, "move_timeout_s"), ({"clock": {"tick_ms": 9}}, "clock")]
+    for extra, msg in bad:
+        with pytest.raises(manifest.ManifestError, match=msg):
+            manifest.validate_meta({**base, **extra})
+
+
+def test_views_and_hooks():
+    from gamekernel import views
+    assert views.strip_private({"a": 1, "_b": 2}) == {"a": 1}
+    game = calls.GameCalls(OldStep())
+    assert game.hooks() == [] and game.to_act({}) == ["p0", "p1"]
+    assert game.view({"x": 1, "_seed": 9}, "p0") == {"x": 1}
+
+    class Hooked(OldStep):
+        def to_act(self, state):
+            return state["who"]
+
+        def view(self, state, seat):
+            return {**state, "_leak": 1, "seat": seat}
+    hooked = calls.GameCalls(Hooked())
+    assert hooked.hooks() == ["to_act", "view"]
+    assert hooked.to_act({"who": ["p1"]}) == ["p1"]
+    for bad in ([], ["p2"], ["p0", "p0"], "p0"):
+        with pytest.raises(ValueError, match="to_act"):
+            hooked.to_act({"who": bad})
+    assert hooked.view({"a": 1}, "p1") == {"a": 1, "seat": "p1"}   # "_" dropped after the hook
+    assert hooked.dispatch("hooks", {}) == ["to_act", "view"]

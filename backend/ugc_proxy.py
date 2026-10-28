@@ -12,6 +12,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 import ugc_runner
+from gamekernel.views import strip_private
 
 
 class UGCAIRequest(BaseModel):
@@ -46,6 +47,7 @@ class ProxyAdapter:
         self._on_unhealthy = on_unhealthy
         self._info = None
         self._bounds = None
+        self._hooks: list[str] | None = None
 
     def _worker(self) -> ugc_runner.GameWorker:
         return ugc_runner.get_worker(self.game_id, self.game_dir,
@@ -116,6 +118,26 @@ class ProxyAdapter:
 
     def model_inputs(self, state, owner=0):
         return self._worker().request("model_inputs", state=state, owner=owner)
+
+    # ------------------------------------------- optional match hooks (17 §6)
+    @property
+    def hooks(self) -> list[str]:
+        """Which optional hooks the package implements (asked once, cached)."""
+        if self._hooks is None:
+            self._hooks = list(self._worker().request("hooks") or [])
+        return self._hooks
+
+    def to_act(self, state, seats=("p0", "p1")) -> list[str]:
+        if "to_act" not in self.hooks:
+            return list(seats)
+        return self._worker().request("to_act", state=state, seats=list(seats))
+
+    def view(self, state, seat=None):
+        """Live view for a seat (None = spectator). Without a package hook the
+        "_" keys are dropped here, with no sandbox round trip."""
+        if "view" not in self.hooks:
+            return strip_private(state)
+        return self._worker().request("view", state=state, seat=seat)
 
     def model_decode(self, outputs, state, owner=0):
         return self._worker().request("model_decode", outputs=outputs,

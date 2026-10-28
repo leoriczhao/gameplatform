@@ -31,7 +31,7 @@ _COORDINATE = {
 STATE_SCHEMA = {
     "$schema": _DRAFT,
     "type": "object",
-    "required": ["body", "direction", "food", "score", "tick", "seed",
+    "required": ["body", "direction", "food", "score", "tick", "_seed",
                  "done", "cause", "grid"],
     "properties": {
         "body": {"type": "array", "items": _COORDINATE,
@@ -41,7 +41,8 @@ STATE_SCHEMA = {
         "food": {"anyOf": [_COORDINATE, {"type": "null"}]},
         "score": {"type": "integer", "minimum": 0},
         "tick": {"type": "integer", "minimum": 0},
-        "seed": {"type": "integer"},
+        "_seed": {"type": "integer",
+                  "description": "Server-private: hidden from live match viewers, revealed after the match"},
         "done": {"type": "boolean"},
         "cause": {"enum": [None, "wall", "self", "win"]},
         "grid": {"const": [20, 20]},

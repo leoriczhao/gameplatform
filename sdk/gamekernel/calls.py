@@ -11,7 +11,10 @@ import json
 
 import numpy as np
 
+from .views import strip_private
+
 MAX_BATCH = 256
+OPTIONAL_HOOKS = ("to_act", "view")   # match-contract hooks (design 17 §6)
 
 
 def wire(value):
@@ -75,6 +78,27 @@ class GameCalls:
         if not isinstance(obs, (list, tuple)):
             obs = wire(obs)
         return np.asarray(obs, dtype=np.float32)
+
+    # ------------------------------------------------------- match hooks
+    def hooks(self) -> list[str]:
+        """Optional match hooks this package implements."""
+        return [name for name in OPTIONAL_HOOKS if callable(getattr(self.adapter, name, None))]
+
+    def to_act(self, state, seats=("p0", "p1")) -> list[str]:
+        """Seats that must act this tick; default every seat."""
+        if not callable(getattr(self.adapter, "to_act", None)):
+            return list(seats)
+        out = self.adapter.to_act(state)
+        if (not isinstance(out, (list, tuple)) or not out
+                or any(s not in seats for s in out) or len(set(out)) != len(out)):
+            raise ValueError(f"to_act must return a non-empty subset of {list(seats)}, got {out!r}")
+        return list(out)
+
+    def view(self, state, seat=None):
+        """What ``seat`` (None = spectator) may see of a live state."""
+        if callable(getattr(self.adapter, "view", None)):
+            state = self.adapter.view(state, seat)
+        return self._out(strip_private(state))
 
     def opponent_action(self, state, config):
         return self._out(self.adapter.opponent_action(state, config))
@@ -170,4 +194,10 @@ class GameCalls:
             return self.model_decode(args["outputs"], args["state"], args.get("owner", 0))
         if op == "ai_action":
             return self.ai_action(args["payload"])
+        if op == "hooks":
+            return self.hooks()
+        if op == "to_act":
+            return self.to_act(args["state"], tuple(args.get("seats") or ("p0", "p1")))
+        if op == "view":
+            return self.view(args["state"], args.get("seat"))
         raise ValueError(f"unknown op {op!r}")

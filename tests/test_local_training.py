@@ -189,7 +189,7 @@ def test_package_directory_loads_without_server():
     game = load_game(str(ROOT / "packaged-games" / "snake"))
     assert isinstance(game, LocalGame) and game.slug == "snake"
     state = game.new_state(3)
-    assert state["seed"] == 3 and isinstance(state["body"][0], list)
+    assert state["_seed"] == 3 and isinstance(state["body"][0], list)
 
 
 def test_export_uses_package_contract_and_local_evaluate(base_url, cache, tmp_path):

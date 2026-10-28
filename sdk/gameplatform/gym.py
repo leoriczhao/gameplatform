@@ -83,7 +83,7 @@ class PlatformEnv(gym.Env):
         super().reset(seed=seed)
         obs = self._env.reset(seed=seed, options=options)
         state = self._env.states[0]
-        return obs[0], {"state": state, "seed": state.get("seed")}
+        return obs[0], {"state": state, "seed": self._env.current_seeds[0]}
 
     def step(self, action):
         obs, reward, dones, infos = self._env.step([int(action)])

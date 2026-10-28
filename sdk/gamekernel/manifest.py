@@ -434,7 +434,8 @@ def validate_meta(meta, builtin_games=None, files=None) -> dict:
              "contract", "ai_strategies", "pvp", "opponents",
              "default_opponent", "controls",
              "assets", "sounds", "renderer",   # v2（12 §3）+ 渲染 v2（16）
-             "local_training"}                 # 本地训练分发（18）
+             "local_training",                 # 本地训练分发（18）
+             "seats", "clock"}                 # 对局契约（17 §6）
     unknown = set(meta) - known
     if unknown:
         raise _err(f"game.yaml 存在未知字段：{', '.join(sorted(unknown))}")
@@ -650,6 +651,48 @@ def validate_meta(meta, builtin_games=None, files=None) -> dict:
         if not isinstance(meta["local_training"], bool):
             raise _err("local_training 需为布尔值")
         out["local_training"] = meta["local_training"]
+    if meta.get("seats") is not None:
+        seats = meta["seats"]
+        if isinstance(seats, bool) or seats not in (1, 2):
+            raise _err("seats 需为 1 或 2")
+        out["seats"] = seats
+    if meta.get("clock") is not None:
+        out["clock"] = clock_spec(meta["clock"])
+    return out
+
+
+CLOCK_KINDS = ("turn",)   # realtime is reserved (design 17 §0.1)
+
+
+def _rule_num(name: str, v, lo: float, hi: float, *, integer: bool = False):
+    """Game-rule numbers are rejected out of range, never clamped: a silently
+    changed time control would not be the one the author wrote."""
+    if isinstance(v, bool) or not isinstance(v, (int, float)) \
+            or (integer and not float(v).is_integer()) or not lo <= v <= hi:
+        raise _err(f"{name} 需为 {lo}-{hi} 之间的{'整数' if integer else '数字'}")
+    return int(v) if integer or float(v).is_integer() else float(v)
+
+
+def clock_spec(v) -> dict:
+    """{kind: turn, move_timeout_s?, on_timeout?, max_timeouts?} (design 17 §6).
+
+    move_timeout_s binds only when a human's delay holds up another human."""
+    if not isinstance(v, dict) or set(v) - {"kind", "move_timeout_s", "on_timeout",
+                                            "max_timeouts"}:
+        raise _err("clock 需为 {kind, move_timeout_s?, on_timeout?, max_timeouts?}")
+    kind = v.get("kind", "turn")
+    if kind == "realtime":
+        raise _err("clock.kind=realtime 暂未开放（设计 17 §0.1），请使用 turn")
+    if kind not in CLOCK_KINDS:
+        raise _err("clock.kind 需为 turn")
+    out = {"kind": kind,
+           "move_timeout_s": None if v.get("move_timeout_s") is None else
+           _rule_num("clock.move_timeout_s", v["move_timeout_s"], 5, 3600),
+           "on_timeout": v.get("on_timeout", "empty"),
+           "max_timeouts": int(_rule_num("clock.max_timeouts", v.get("max_timeouts", 5),
+                                         1, 100, integer=True))}
+    if out["on_timeout"] not in ("empty", "forfeit"):
+        raise _err("clock.on_timeout 需为 empty 或 forfeit")
     return out
 
 

@@ -36,7 +36,9 @@ def test_bit_identical_to_original_service():
     """The port must advance EXACTLY like https://snake.cree1p.com's env."""
     for seed in (0, 1, 42, 1337, 2024):
         rng = random.Random(seed)
-        ours = _greedy_random_states(env, seed, 600, rng)
+        # 1.2.0 keeps the seed private (_seed); the dynamics must stay identical
+        ours = [{("seed" if k == "_seed" else k): v for k, v in s.items()}
+                for s in _greedy_random_states(env, seed, 600, rng)]
         rng = random.Random(seed)
         theirs = _greedy_random_states(original, seed, 600, rng)
         assert len(ours) == len(theirs), f"seed {seed}: trajectory lengths differ"
@@ -133,7 +135,7 @@ def test_validate_state_rejections():
         ("short body", {**good, "body": [[1, 1]]}),
         ("dup body", {**good, "body": [[1, 1], [1, 1]]}),
         ("bad direction", {**good, "direction": 9}),
-        ("non-int seed", {**good, "seed": "42"}),
+        ("non-int seed", {**good, "_seed": "42"}),
         ("food on body", {**good, "food": list(good["body"][0])}),
         ("food oob", {**good, "food": [99, 0]}),
     ]
