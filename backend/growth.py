@@ -96,28 +96,8 @@ def level_progress(xp: int) -> float:
     return min(1.0, max(0.0, (xp - base) / need)) if need else 1.0
 
 
-def award_pvp(sess) -> None:
-    """XP for a finished PvP session (both modes; both players)."""
-    for side, pid in (("p0", sess.p0["id"]), ("p1", sess.p1["id"])):
-        award_xp(pid, sess.game, "pvp_play", XP_PVP_PLAY)
-        if sess.winner is not None and side == f"p{sess.winner}":
-            award_xp(pid, sess.game, "pvp_win", XP_PVP_WIN)
-
-
-def award_pve(sess) -> None:
-    """XP for a finished PvE session (registered users only)."""
-    uid = sess.principal.get("id") if sess.principal else None
-    if not uid:
-        return
-    award_xp(uid, sess.game, "pve_finish", XP_PVE_FINISH)
-    if sess.winner == 0:
-        award_xp(uid, sess.game, "pve_win", XP_PVE_WIN)
-
-
 def _on_match_finished(payload) -> None:
-    if not isinstance(payload, dict):   # v1 play session (removed at the v2 cutover)
-        award_pvp(payload) if payload.kind == "pvp" else award_pve(payload)
-        return
+    """XP is awarded from the v2 settlement payload (design 17 §13)."""
     game, winner = payload["game"], payload["winner"]
     if payload["kind"] == "pvp":
         for p in payload["players"]:
@@ -132,7 +112,8 @@ def _on_match_finished(payload) -> None:
 
 
 def _winner_seat(result: dict) -> str | None:
-    """v2 records store the winning seat ("p1"); v1 records the side index."""
+    """v2 records store the winning seat ("p1"); a not-yet-migrated legacy row
+    may still carry the integer side index (the M4 migration normalizes it)."""
     winner = result.get("winner")
     return winner if winner is None or isinstance(winner, str) else f"p{winner}"
 

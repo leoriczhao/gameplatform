@@ -46,7 +46,7 @@ export default function Stage({ uid: uidProp, variant = "full" }) {
   const [boardHandler, setBoardHandler] = useState(null);
   const [resultOpen, setResultOpen] = useState(true);
 
-  const { view, error, connection, chat, actions } = useMatch(uid, {
+  const { view, error, connection, actions } = useMatch(uid, {
     token, enabled: authReady,
   });
   const frames = useFrames(uid, {
@@ -200,7 +200,7 @@ export default function Stage({ uid: uidProp, variant = "full" }) {
           ) : null}
         </div>
         {variant === "full" ? (
-          <SidePanel view={view} caps={caps} meta={meta} chat={chat}
+          <SidePanel view={view} caps={caps} meta={meta}
             actions={stageActions} frames={frames} />
         ) : null}
       </div>

@@ -36,6 +36,7 @@ function snapshot(overrides = {}) {
     frames: 4,
     created_at: 1_700_000_000,
     rematch: null,
+    chat: [],
     ...overrides,
   };
 }
@@ -130,21 +131,75 @@ test("status finished clears the pending tick and keeps the result", () => {
   assert.equal(isTerminalStatus(finished.status), true);
 });
 
-test("rematch, chat and ping keep their own places", () => {
+test("rematch and ping keep their own places", () => {
   const view = reduceMatch(null, snapshot(), NOW);
   const offered = reduceMatch(view, {
     type: "rematch", seq: 13, rematch: { state: "offered", by: "p1", expires_at: NOW / 1000 + 60 },
   }, NOW);
   assert.equal(offered.rematch.state, "offered");
-  const chat = reduceMatch(offered, { type: "chat", seq: 14,
-    message: { id: 1, from: "p1", text: "gg", at: NOW } }, NOW);
-  assert.equal(chat.chat.length, 1);
-  const duplicate = reduceMatch(chat, { type: "chat", seq: 15,
-    message: { id: 1, from: "p1", text: "gg", at: NOW } }, NOW);
-  assert.equal(duplicate.chat.length, 1);
-  const ping = reduceMatch(duplicate, { type: "ping", server_time: NOW + 1250 }, NOW);
-  assert.equal(ping.seq, 15);
+  const ping = reduceMatch(offered, { type: "ping", server_time: NOW + 1250 }, NOW);
+  assert.equal(ping.seq, 13);
   assert.equal(ping.server_offset_ms, 1250);
+});
+
+test("snapshot chat becomes the authoritative history (normalized and deduped)", () => {
+  const view = reduceMatch(null, snapshot({ chat: [
+    { id: 1, from: 1, name: "leoric", seat: "p0", text: "hi", at: NOW, tick: 0 },
+    { id: 2, from: 2, name: "maria", seat: "p1", text: "yo", at: NOW + 1000, tick: 1 },
+    { id: 2, from: 2, name: "maria", seat: "p1", text: "dup", at: NOW + 1000, tick: 1 },
+  ] }), NOW);
+  assert.equal(view.chat.length, 2);
+  assert.deepEqual(view.chat[1], {
+    id: 2, from: 2, name: "maria", seat: "p1", text: "yo", at: NOW + 1000, tick: 1,
+  });
+});
+
+test("a snapshot without chat keeps the chat we already have", () => {
+  const first = reduceMatch(null, snapshot({ chat: [
+    { id: 1, from: 1, text: "hi", at: NOW, tick: 0 },
+  ] }), NOW);
+  // 服务端对非双方（如观战者）可能不带 chat 字段：此时保留客户端已有列表
+  const next = reduceMatch(first, snapshot({ seq: 8, chat: undefined }), NOW);
+  assert.equal(next.seq, 8);
+  assert.equal(next.chat.length, 1);
+  assert.equal(next.chat[0].text, "hi");
+});
+
+test("chat events append by id, dedupe duplicates and keep the latest 200", () => {
+  let view = reduceMatch(null, snapshot(), NOW);
+  for (let i = 1; i <= 250; i += 1) {
+    view = reduceMatch(view, {
+      type: "chat", seq: 10 + i,
+      message: { id: i, from: i % 2 ? 1 : 2, text: `m${i}`, at: NOW, tick: i },
+    }, NOW);
+  }
+  assert.equal(view.chat.length, 200);
+  assert.equal(view.chat[0].id, 51);
+  assert.equal(view.chat[199].id, 250);
+  const duplicate = reduceMatch(view, {
+    type: "chat", seq: 999,
+    message: { id: 250, from: 1, text: "dup", at: NOW, tick: 251 },
+  }, NOW);
+  assert.equal(duplicate.chat.length, 200);
+  assert.equal(duplicate.chat[199].text, "m250");
+});
+
+test("chat events normalize the legacy REST shape and flat payloads", () => {
+  // 平铺：字段直接在事件上（兼容不同后端实现）
+  const flat = reduceMatch(reduceMatch(null, snapshot(), NOW), {
+    type: "chat", seq: 20, id: 7, user_id: 2, nickname: "maria", seat: "p1",
+    text: "hey", created_at: NOW,
+  }, NOW);
+  assert.equal(flat.chat[0].from, 2);
+  assert.equal(flat.chat[0].name, "maria");
+  assert.equal(flat.chat[0].seat, "p1");
+  assert.equal(flat.chat[0].at, NOW);
+  // event.message 用旧 REST 形状（user_id / nickname / created_at）
+  const legacy = reduceMatch(flat, { type: "chat", seq: 21,
+    message: { id: 8, user_id: 1, nickname: "leoric", text: "yo", created_at: NOW } }, NOW);
+  assert.equal(legacy.chat.length, 2);
+  assert.equal(legacy.chat[1].from, 1);
+  assert.equal(legacy.chat[1].name, "leoric");
 });
 
 test("the log keeps tick / submit / status entries for the side panel", () => {

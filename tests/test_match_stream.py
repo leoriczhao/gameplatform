@@ -129,3 +129,39 @@ def test_presence_follows_the_players_connection(base):
                and e["data"]["presence"] == "offline", timeout=40)
     assert presence() == ["online", "offline"]
     watch.close()
+def test_chat_events_are_players_only(base):
+    """Chat rides the match stream (design 17 M4): players get the message as a
+    chat event, spectators get neither the event nor the snapshot payload."""
+    a, b = _user(base, "chat_a"), _user(base, "chat_b")
+    room = requests.post(base + "/api/v2/matches", headers=a, json={
+        "game": "microrts", "mode": "casual", "visibility": "public", "seats": [
+            {"seat": "p0", "occupant": "me", "controller": {"type": "human"}},
+            {"seat": "p1", "occupant": None, "controller": {"type": "human"}}]}).json()
+    mid = room["id"]
+    assert requests.post(f"{base}/api/v2/matches/{mid}/seats/p1/join",
+                         json={}, headers=b).status_code == 200
+    url = f"{base}/api/v2/matches/{mid}/stream"
+    player = Stream(url, a)
+    player.wait(lambda e: e["type"] == "snapshot")
+    spectator = Stream(url)
+    spectator.wait(lambda e: e["type"] == "snapshot")
+
+    r = requests.post(f"{base}/api/v2/matches/{mid}/chat", json={"text": "  gg  "}, headers=b)
+    assert r.status_code == 200, r.text
+    message = r.json()["message"]
+    assert message["text"] == "gg" and message["seat"] == "p1"
+    event = player.wait(lambda e: e["type"] == "chat")
+    assert event["data"]["id"] == message["id"] and event["data"]["text"] == "gg"
+    # The timeline mark rides to everyone, but carries no message text.
+    player.wait(lambda e: e["type"] == "mark" and e["data"]["kind"] == "chat")
+
+    time.sleep(0.4)
+    assert not [e for e in spectator.events if e["type"] == "chat"]
+    public_snapshot = requests.get(f"{base}/api/v2/matches/{mid}").json()
+    assert public_snapshot["you"]["seat"] is None and public_snapshot["chat"] == []
+    assert [m["text"] for m in requests.get(f"{base}/api/v2/matches/{mid}",
+                                             headers=a).json()["chat"]] == ["gg"]
+    # The polling GET is gone for everyone.
+    assert requests.get(f"{base}/api/v2/matches/{mid}/chat", headers=a).status_code == 404
+    player.close()
+    spectator.close()

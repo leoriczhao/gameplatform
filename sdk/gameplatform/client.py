@@ -1,4 +1,8 @@
-"""Typed clients for the platform's v1 API: accounts, models, matches, play.
+"""Typed clients for the platform API: accounts, models and v2 matches.
+
+The match protocol is **v2** (design 17 §5): commands over REST, snapshots from
+GET /api/v2/matches/{uid} and history from the frames endpoint. The v1 session
+/ room / quick-match APIs no longer exist (SDK 1.0 breaking release).
 
     from gameplatform import PlatformClient
 
@@ -8,35 +12,70 @@
     model = c.upload_model("my_snake_dqn.onnx", game="snake", name="我的DQN")
     c.eval_model(model["id"])
 
-    # 模型对战（异步）：创建后轮询直到结束
-    match_id = c.create_match(game="microrts", model_a=model["id"],
-                              model_b="ai:light_rush")
-    result = c.wait_match(match_id)
+    # 模型对战（v2，两个 model 座位）：返回对局 uid，轮询快照直到终局
+    uid = c.create_match(game="microrts", model_a=model["id"],
+                         model_b="ai:light_rush")
+    result = c.wait_match(uid)
 
-    # 全量 API 玩（会话制，服务器权威）
+    # 全量 API 玩（v2 对局客户端，服务器权威）
     s = c.session("microrts")
     s.start_pve(opponent="worker_rush")
     while not s.done:
-        s.act(build_commands(s.state))               # 你本地任意决策逻辑
+        s.act(build_commands(s.match))               # 你本地任意决策逻辑
 
     p = c.session("microrts").create_pvp()
-    print("邀请码:", p.invite)                        # 发给朋友
+    print("对局 id:", p.id, "邀请码:", p.invite)       # 发给朋友
 """
 from __future__ import annotations
 
 import time
+from urllib.parse import quote
 
 import requests
 
 DEFAULT_BASE_URL = "https://games.cree1p.com"
 
+#: Match statuses after which no command is accepted (design 17 §5).
+TERMINAL_STATUS = ("finished", "cancelled", "aborted")
+
 
 class PlatformError(RuntimeError):
-    pass
+    """An API error carrying the platform's machine-readable error code.
+
+    v2 errors are {code, message} (design 17 §5.1): e.g. stale_tick,
+    not_to_act, match_over.
+    """
+
+    def __init__(self, message: str, *, code: str | None = None,
+                 status: int | None = None, detail=None):
+        super().__init__(message)
+        self.code = code
+        self.status = status
+        self.detail = detail
+
+
+def _controller(value) -> dict:
+    """Normalise a seat controller spec to the v2 shape.
+
+    Accepts a controller dict as-is, a model id, "ai:<strategy>" or a bare
+    strategy name (design 17 §5: {"type": "human"|"ai"|"model"|"bot", ...}).
+    """
+    if isinstance(value, dict):
+        return dict(value)
+    if isinstance(value, int):
+        return {"type": "model", "model_id": value}
+    if isinstance(value, str):
+        text = value.strip()
+        if text.isdigit():
+            return {"type": "model", "model_id": int(text)}
+        if text.startswith("ai:"):
+            text = text[3:]
+        return {"type": "ai", "strategy": text}
+    raise TypeError(f"无法识别的 controller：{value!r}")
 
 
 class PlatformClient:
-    """HTTP wrapper for /api/v1/* (auth, models, matches, ratings, play)."""
+    """HTTP wrapper for the platform API: auth, models, v2 matches, ratings."""
 
     def __init__(self, base_url: str = DEFAULT_BASE_URL, token: str | None = None,
                  timeout: float = 15.0):
@@ -52,16 +91,24 @@ class PlatformClient:
         kw.setdefault("timeout", self.timeout)
         resp = self.http.request(method, self.base_url + path, **kw)
         if not resp.ok:
-            detail = f"HTTP {resp.status_code}"
+            status = resp.status_code
+            code = None
+            message = f"HTTP {status}"
             try:
                 data = resp.json()
-                if isinstance(data.get("detail"), str):
-                    detail = data["detail"]
-                elif data.get("detail"):
-                    detail = str(data["detail"])
             except Exception:
-                pass
-            raise PlatformError(detail)
+                data = None
+            if isinstance(data, dict):
+                err = data.get("detail", data)
+                if isinstance(err, dict):
+                    code = err.get("code")
+                    if isinstance(err.get("message"), str):
+                        message = err["message"]
+                    elif err.get("message") is not None:
+                        message = str(err["message"])
+                elif isinstance(err, str):
+                    message = err
+            raise PlatformError(message, code=code, status=status, detail=data)
         if resp.status_code == 204:
             return {}
         return resp.json()
@@ -114,46 +161,78 @@ class PlatformClient:
     def eval_model(self, model_id: int) -> dict:
         return self._req("POST", f"/api/v1/models/{model_id}/eval")["metrics"]
 
-    # --------------------------------------------------------------- matches
-    def create_match(self, game: str, model_a: int, model_b) -> int:
-        """model_b: model id (int) | "ai:<strategy>" | bare strategy name."""
-        if isinstance(model_b, str) and not model_b.isdigit() \
-                and not model_b.startswith("ai:"):
-            model_b = f"ai:{model_b}"
-        return self._req("POST", "/api/v1/matches",
-                         json={"game": game, "model_a": int(model_a),
-                               "model_b": model_b})["match_id"]
+    # ----------------------------------------------------------- matches (v2)
+    def create_match(self, game: str, model_a: int, model_b) -> str:
+        """Create a v2 model-vs-model match; returns the match uid.
 
-    def get_match(self, match_id: int) -> dict:
-        return self._req("GET", f"/api/v1/matches/{match_id}")["match"]
+        Seats: p0 = model_a (a model of yours), p1 = model_b -- a model id,
+        "ai:<strategy>" or a bare strategy name (a controller dict passes
+        through). kind/mode are derived by the server (design 17 §5).
+        """
+        seats = [
+            {"seat": "p0", "occupant": None,
+             "controller": {"type": "model", "model_id": int(model_a)}},
+            {"seat": "p1", "occupant": None, "controller": _controller(model_b)},
+        ]
+        view = self._req("POST", "/api/v2/matches",
+                         json={"game": game, "seats": seats})
+        return view["id"]
 
-    def my_matches(self) -> list[dict]:
-        return self._req("GET", "/api/v1/matches")["matches"]
+    def get_match(self, uid: str) -> dict:
+        """The v2 MatchView snapshot (design 17 §5)."""
+        return self._req("GET", f"/api/v2/matches/{uid}")
 
-    def wait_match(self, match_id: int, timeout: float = 300.0,
+    def wait_match(self, uid: str, timeout: float = 300.0,
                    poll: float = 2.0) -> dict:
-        """Poll an async match until it finishes/fails; returns the match."""
+        """Poll the v2 snapshot until the match is terminal; returns it."""
         deadline = time.time() + timeout
         while time.time() < deadline:
-            m = self.get_match(match_id)
-            if m["status"] in ("finished", "failed"):
-                return m
+            view = self.get_match(uid)
+            if view.get("status") in TERMINAL_STATUS:
+                return view
             time.sleep(poll)
-        raise TimeoutError(f"match {match_id} still running after {timeout}s")
+        raise TimeoutError(f"match {uid} still running after {timeout}s")
+
+    def match_replay(self, uid: str, *, limit: int = 500) -> dict:
+        """Assemble the full frame history via /frames pagination.
+
+        Returns {"id": uid, "frames": [{tick, frame, actions, events}],
+        "total": n}. States come from the sealed frames; the client never
+        re-simulates the match.
+        """
+        page_size = max(1, min(int(limit), 500))   # the server caps frames pages at 500
+        frames: list[dict] = []
+        offset, total = 0, None
+        while True:
+            page = self._req(
+                "GET",
+                f"/api/v2/matches/{uid}/frames?from={offset}&limit={page_size}")
+            items = page.get("frames") or []
+            frames.extend(items)
+            total = page.get("total", total)
+            nxt = page.get("next")
+            if nxt is None or not items or int(nxt) <= offset:
+                break
+            offset = int(nxt)
+        return {"id": uid, "frames": frames,
+                "total": len(frames) if total is None else int(total)}
+
+    def my_matches(self) -> list[dict]:
+        """v1 match history list (GET /api/v1/matches, kept read-only).
+
+        Historical records only. For live/reconnect matches use
+        my_live_matches() (v2 MatchView snapshots).
+        """
+        return self._req("GET", "/api/v1/matches")["matches"]
+
+    def my_live_matches(self) -> list[dict]:
+        """My waiting/active v2 matches -- the reconnect entry point."""
+        return self._req("GET", "/api/v2/me/matches")["matches"]
 
     def ratings(self, game: str) -> list[dict]:
         return self._req("GET", f"/api/v1/ratings/{game}")["items"]
 
     # ------------------------------------------------------- leaderboard
-    def submit_score(self, game: str, match_id: int,
-                     name: str | None = None) -> dict:
-        """Claim a leaderboard slot from a finished PvE match. The score is
-        read server-side from that match; clients cannot report a number."""
-        body: dict = {"match_id": int(match_id)}
-        if name:
-            body["name"] = name
-        return self._req("POST", f"/api/{game}/scores", json=body)
-
     def scores(self, game: str, limit: int = 10) -> list[dict]:
         return self._req("GET",
                          f"/api/{game}/scores?limit={int(limit)}")["items"]
@@ -184,15 +263,14 @@ class PlatformClient:
     def remove_friend(self, friend_id: int) -> dict:
         return self._req("DELETE", f"/api/v1/friends/{friend_id}")
 
-    def chat_send(self, game: str, session_id: str, text: str) -> dict:
-        return self._req("POST",
-                         f"/api/v1/{game}/play/sessions/{session_id}/chat",
-                         json={"text": text})["message"]
+    def send_chat(self, uid: str, text: str) -> dict:
+        """Send room chat (players only); returns the stored message.
 
-    def chat_since(self, game: str, session_id: str, since: int = 0) -> dict:
-        return self._req("GET",
-                         f"/api/v1/{game}/play/sessions/{session_id}/chat"
-                         f"?since={since}")
+        Reads come from MatchView["chat"] (snapshot) or the stream's chat
+        event -- the v2 protocol has no chat polling endpoint.
+        """
+        return self._req("POST", f"/api/v2/matches/{uid}/chat",
+                         json={"text": text})["message"]
 
     def notifications(self) -> dict:
         return self._req("GET", "/api/v1/notifications")
@@ -266,88 +344,74 @@ class PlatformClient:
         return self._req("POST", f"/api/v1/admin/announcements/{aid}/active",
                          json={"status": "on" if active else "off"})
 
-    def match_replay(self, match_id: int) -> dict:
-        """Public replay view (06 §7 / 07 M4): players + result + seed +
-        per-tick moves. Rebuild states locally via the env API (same seed
-        => same trajectory)."""
-        return self._req("GET", f"/api/v1/matches/{match_id}/replay")["replay"]
+    # ------------------------------------------------------------ v2 session
+    def session(self, game: str, match_id: str | None = None) -> "SessionClient":
+        """A stateful v2 match client; pass match_id to attach to one."""
+        return SessionClient(self, game, match_id)
 
-    # ------------------------------------------------------------------ play
-    def session(self, game: str) -> "SessionClient":
-        return SessionClient(self, game)
-
-    # ------------------------------------------------------- rooms (v1.0-a)
+    # ------------------------------------------------------- rooms (design 17)
     def create_room(self, game: str, mode: str = "casual",
                     visibility: str = "public",
-                    seed: int | None = None) -> "SessionClient":
-        """Create a PvP room. mode: ranked|casual (D10 default casual);
-        visibility: public (lobby list) | private (invite only)."""
-        payload = {"mode": mode, "visibility": visibility}
-        if seed is not None:
-            payload["settings"] = {"seed": seed}
-        d = self._req("POST", f"/api/v1/{game}/play/rooms", json=payload)
-        s = SessionClient(self, game)
-        s._apply(d)
-        s.invite = d.get("invite")
-        return s
+                    seed: int | None = None) -> dict:
+        """Create a v2 PvP room (p0 = me, p1 open); returns its MatchView.
 
-    def list_rooms(self, game: str, mode: str | None = None) -> list[dict]:
-        """Waiting public rooms for one game (optional mode filter)."""
-        path = f"/api/v1/{game}/play/rooms"
+        mode: ranked|casual. visibility: public (lobby) | unlisted | private
+        (view["invite"] is required to join). Hosting it through a
+        SessionClient is the c.session(game).create_pvp() path.
+        """
+        seats = [
+            {"seat": "p0", "occupant": "me", "controller": {"type": "human"}},
+            {"seat": "p1", "occupant": None, "controller": {"type": "human"}},
+        ]
+        body: dict = {"game": game, "seats": seats,
+                      "mode": mode, "visibility": visibility}
+        if seed is not None:
+            body["settings"] = {"seed": int(seed)}
+        return self._req("POST", "/api/v2/matches", json=body)
+
+    def join_room(self, uid: str, invite: str | None = None,
+                  seat: str = "p1") -> dict:
+        """Take the open seat of a v2 room; private rooms need the invite code."""
+        return self._req(
+            "POST", f"/api/v2/matches/{uid}/seats/{seat}/join",
+            json={"invite": invite})
+
+    def lobby(self, game: str, mode: str | None = None) -> list[dict]:
+        """Waiting public rooms for one game (v2 lobby)."""
+        path = f"/api/v2/matches?game={quote(game)}"
         if mode:
-            path += f"?mode={mode}"
+            path += f"&mode={quote(mode)}"
         return self._req("GET", path)["rooms"]
 
-    def join_room(self, game: str, room_id: str,
-                  invite: str | None = None) -> "SessionClient":
-        """Join a waiting room by id; private rooms need the invite code."""
-        body = {"invite": invite} if invite else {}
-        d = self._req("POST",
-                      f"/api/v1/{game}/play/rooms/{room_id}/join", json=body)
-        s = SessionClient(self, game)
-        s._apply(d)
-        s.invite = d.get("invite")
-        return s
+    # --------------------------------------------------- v2 quick match (D9)
+    def quick_match(self, game: str, mode: str = "casual",
+                    timeout: float = 60.0, poll: float = 1.0) -> str:
+        """Enter v2 matchmaking and block until matched; returns the match uid.
 
-    # ----------------------------------------------- quick match (v1.0-a M2)
-    def join_quick_match(self, game: str, mode: str = "ranked",
-                         timeout: float = 60.0, poll: float = 1.0) -> "SessionClient":
-        """Enter the matchmaking queue and block until matched; returns a
-        SessionClient attached to the matched PvP room (D9: ELO band relaxes
-        over time, so two waiting players always match eventually)."""
-        d = self._req("POST", f"/api/v1/{game}/matchmaking/queue",
-                      json={"mode": mode})
-        if d.get("matched") and d.get("session_id"):
-            return self._open_matched_session(game, d["session_id"])
+        Polls GET /api/v2/{game}/matchmaking/status until the server reports
+        a match_id (the v2 matched entry is idempotent and stays readable).
+        """
+        st = self._req("POST", f"/api/v2/{game}/matchmaking/queue",
+                       json={"mode": mode})
         deadline = time.time() + timeout
-        while time.time() < deadline:
-            st = self.queue_status(game)
-            if st.get("matched") and st.get("session_id"):
-                return self._open_matched_session(game, st["session_id"])
+        while True:
+            if st.get("match_id"):
+                return st["match_id"]
             if not st.get("queued"):
-                raise PlatformError("已不在匹配队列中（超时或被取消）")
+                raise PlatformError("已不在匹配队列中（超时或被取消）",
+                                    code="not_queued")
+            if time.time() >= deadline:
+                raise TimeoutError(f"quick match timed out after {timeout}s")
             time.sleep(poll)
-        raise TimeoutError(f"quick match timed out after {timeout}s")
-
-    def _open_matched_session(self, game: str, sid: str) -> "SessionClient":
-        s = SessionClient(self, game)
-        d = self._req("GET", f"/api/v1/{game}/play/sessions/{sid}")
-        s._apply(d)
-        return s
+            st = self.queue_status(game)
 
     def queue_status(self, game: str) -> dict:
-        """Current matchmaking queue state (poll every ~2s)."""
-        return self._req("GET", f"/api/v1/{game}/matchmaking/status")
+        """v2 queue state; poll every ~2s until match_id appears."""
+        return self._req("GET", f"/api/v2/{game}/matchmaking/status")
 
     def cancel_queue(self, game: str) -> dict:
-        """Leave the matchmaking queue."""
-        return self._req("DELETE", f"/api/v1/{game}/matchmaking/queue")
-
-    # ------------------------------------------- reconnect/rematch (v1.0-a M3)
-    def active_games(self) -> list[dict]:
-        """My unfinished (waiting/active) sessions with my side — the
-        disconnect-reconnect entry point (06 §7 U5)."""
-        return self._req("GET", "/api/v1/play/active")["sessions"]
+        """Leave the v2 matchmaking queue."""
+        return self._req("DELETE", f"/api/v2/{game}/matchmaking/queue")
 
     # ------------------------------------------------- UGC (v1.1, docs/design/10-11)
     def upload_game(self, path: str, changelog: str = "") -> dict:
@@ -410,133 +474,291 @@ class PlatformClient:
         return self._req("POST", f"/api/v1/admin/ugc/{game_id}/unban")["game"]
 
 
-
 class SessionClient:
-    """One server-side authoritative play session (PvE or PvP).
+    """One v2 match as a stateful client (breaking change from SDK 0.x).
 
-    After every call the authoritative `state` is refreshed; for PvP call
-    `poll()` to observe the opponent's submission / tick advances.
+    In 0.x this wrapped a v1 play session. In 1.0 it is a thin client over
+    /api/v2/matches/{uid} (design 17 §5): self.match always holds the latest
+    MatchView snapshot; act() submits {tick, action} and blocks until it is
+    your turn again (or the match reaches a terminal status).
     """
 
-    def __init__(self, client: PlatformClient, game: str):
+    TERMINAL = TERMINAL_STATUS
+
+    def __init__(self, client: "PlatformClient", game: str,
+                 match_id: str | None = None, view: dict | None = None):
         self.client = client
         self.game = game
-        self.session: dict | None = None
-        self.side: str = "p0"
+        self.id = match_id
+        self.match: dict | None = None
         self.invite: str | None = None
-        self.last_response: dict = {}
+        self.last_ack: dict = {}
+        self.last_rematch: dict | None = None
+        self.poll_interval = 0.25
+        self.act_timeout = 120.0
+        if view is not None:
+            self._apply(view)
 
-    # ------------------------------------------------------------- lifecycle
-    def _apply(self, d: dict) -> dict:
-        self.session = d["session"]
-        if "state" in self.session:
-            self.state = self.session["state"]
-        self.side = d.get("side") or self.session.get("side") or "p0"
-        self.invite = d.get("invite") or self.session.get("invite")
-        return self.session
+    def __repr__(self) -> str:
+        return (f"<SessionClient game={self.game!r} id={self.id!r} "
+                f"status={self.status!r}>")
 
-    def start_pve(self, opponent=None, controller=None, seed: int | None = None):
-        """opponent: None | "strategy" | {"type":"ai","strategy":…} |
-        {"type":"model","model_id":N} | {"type":"external_bot","url":…}
-        controller: {"type":"model","model_id":N} (server autopilot)."""
-        if isinstance(opponent, str):
-            opponent = {"type": "ai", "strategy": opponent}
-        payload = {"kind": "pve", "seed": seed}
-        if opponent:
-            payload["opponent"] = opponent
-        if controller:
-            payload["controller"] = controller
-        self._apply(self.client._req(
-            "POST", f"/api/v1/{self.game}/play/sessions", json=payload))
+    # ------------------------------------------------------------- plumbing
+    def _apply(self, view: dict) -> dict:
+        self.match = view
+        self.id = view.get("id") or self.id
+        self.invite = view.get("invite") or self.invite
+        self.game = view.get("game") or self.game
+        return view
+
+    def _create(self, body: dict) -> "SessionClient":
+        self._apply(self.client._req("POST", "/api/v2/matches", json=body))
+        return self
+
+    def _require_id(self) -> str:
+        if not self.id:
+            raise PlatformError("尚未创建或加入对局", code="no_match")
+        return self.id
+
+    # ------------------------------------------------------------ lifecycle
+    def start_pve(self, opponent=None, controller=None,
+                  seed: int | None = None) -> "SessionClient":
+        """Create a practice match (mode practice, visibility unlisted).
+
+        opponent: None keeps the game's default seating (a 1-seat game, or a
+        2-seat game's default AI); otherwise the opponent for seat p1 -- an AI
+        strategy ("worker_rush" / "ai:worker_rush"), a model id or a controller
+        dict (2-seat games only).
+        controller: controller for *your* seat, e.g.
+        {"type": "model", "model_id": N} to let a model play for you.
+        seed: reproducible game seed (settings.seed).
+        """
+        body: dict = {"game": self.game, "mode": "practice",
+                      "visibility": "unlisted"}
+        if seed is not None:
+            body["settings"] = {"seed": int(seed)}
+        if opponent is not None:
+            body["seats"] = [
+                {"seat": "p0", "occupant": "me",
+                 "controller": _controller(controller)
+                 if controller is not None else {"type": "human"}},
+                {"seat": "p1", "occupant": None,
+                 "controller": _controller(opponent)},
+            ]
+            return self._create(body)
+        self._create(body)
+        if controller is not None:
+            # The default seat layout is server-derived; switch my seat's
+            # controller afterwards (v2 /controller command, design 17 §5).
+            self.set_controller(controller)
         return self
 
     def create_pvp(self, seed: int | None = None, mode: str | None = None,
-                   visibility: str | None = None):
-        """Legacy invite-code flow; bare params stay ranked/private for
-        backward compatibility (06 §4.2)."""
-        payload = {"kind": "pvp", "seed": seed}
-        if mode:
-            payload["mode"] = mode
-        if visibility:
-            payload["visibility"] = visibility
-        d = self.client._req("POST", f"/api/v1/{self.game}/play/sessions",
-                             json=payload)
-        self._apply(d)
-        self.invite = d.get("invite")
-        return self
+                   visibility: str | None = None) -> "SessionClient":
+        """Create a PvP room: p0 = me, p1 open (defaults casual/public, D10).
 
-    def join_pvp(self, invite: str):
+        mode: ranked|casual. visibility: public|unlisted|private (private
+        rooms expose self.invite for the friend to join with).
+        """
+        seats = [
+            {"seat": "p0", "occupant": "me", "controller": {"type": "human"}},
+            {"seat": "p1", "occupant": None, "controller": {"type": "human"}},
+        ]
+        body: dict = {"game": self.game, "seats": seats,
+                      "mode": mode or "casual",
+                      "visibility": visibility or "public"}
+        if seed is not None:
+            body["settings"] = {"seed": int(seed)}
+        return self._create(body)
+
+    def join_pvp(self, match_id: str, invite: str | None = None,
+                 seat: str = "p1") -> "SessionClient":
+        """Take the open seat of a PvP room.
+
+        v2 addresses rooms by match id (POST /api/v2/matches/{uid}/seats/{seat}
+        /join); the v1 join-by-invite-only flow is gone. invite is only needed
+        when the room visibility is private.
+        """
         self._apply(self.client._req(
-            "POST", f"/api/v1/{self.game}/play/sessions",
-            json={"kind": "pvp", "invite": invite.strip().upper()}))
+            "POST", f"/api/v2/matches/{match_id}/seats/{seat}/join",
+            json={"invite": invite}))
         return self
 
-    # ---------------------------------------------------------------- play
-    def act(self, actions, autopoll: bool = True) -> dict:
-        """Submit this side's commands for one tick (None for autopilot).
-        Sends the observed tick for optimistic concurrency (409 = re-poll)."""
-        d = self.client._req(
-            "POST", f"/api/v1/{self.game}/play/sessions/{self.session['id']}/actions",
-            json={"actions": actions, "expected_tick": self.tick})
-        self.last_response = d
-        if "state" in d:
-            self.state = d["state"]
-        if d.get("status"):
-            self.session["status"] = d["status"]
-            if d.get("done"):
-                self.session["winner"] = d.get("winner")
-                self.session["cause"] = d.get("cause")
-        if autopoll and self.session["kind"] == "pvp":
-            self.poll()
-        return d
-
+    # --------------------------------------------------------------- reading
     def poll(self) -> dict:
-        d = self.client._req(
-            "GET", f"/api/v1/{self.game}/play/sessions/{self.session['id']}")
-        self._apply(d)
-        return self.session
+        """Refresh and return the latest MatchView snapshot."""
+        return self._apply(self.client._req(
+            "GET", f"/api/v2/matches/{self._require_id()}"))
+
+    def replay(self, *, limit: int = 500) -> dict:
+        """Sealed frame history {"id", "frames", "total"} (/frames pages)."""
+        return self.client.match_replay(self._require_id(), limit=limit)
+
+    # ------------------------------------------------------------------ play
+    def act(self, actions, *, timeout: float | None = None,
+            poll: float | None = None) -> dict:
+        """Submit this tick's action and wait until it is my turn again.
+
+        The tick of the last snapshot is the idempotency key (design 17 §5.1);
+        a 409 stale_tick refreshes the snapshot and retries. After the 202 ack
+        this polls GET /api/v2/matches/{uid} until you.seat is in to_act again
+        (and not yet submitted) or the match is terminal. Returns the MatchView.
+        """
+        if self.match is None:
+            self.poll()
+        if self.done:
+            return self.match
+        if not self.you_seat:
+            raise PlatformError("当前账号不是本局玩家（无座位）",
+                                code="not_your_seat")
+        timeout = self.act_timeout if timeout is None else timeout
+        wait = self.poll_interval if poll is None else poll
+        deadline = time.monotonic() + timeout
+        retries = 0
+        while True:
+            if self.done:
+                return self.match
+            if not self._my_turn():
+                self._wait_turn(deadline, wait)
+                if self.done:
+                    return self.match
+            try:
+                ack = self.client._req(
+                    "POST", f"/api/v2/matches/{self.id}/actions",
+                    json={"tick": int(self.match["tick"]), "action": actions})
+            except PlatformError as exc:
+                if exc.code == "stale_tick" and retries < 3:
+                    retries += 1
+                    self.poll()
+                    continue
+                if exc.code == "not_to_act" and time.monotonic() < deadline:
+                    if wait:
+                        time.sleep(wait)
+                    self.poll()
+                    continue
+                raise
+            if not isinstance(ack, dict) or not ack.get("accepted"):
+                raise PlatformError(f"动作未被接受：{ack!r}",
+                                    code="not_accepted", detail=ack)
+            self.last_ack = ack
+            return self._wait_turn(deadline, wait, refresh_first=True)
+
+    def _my_turn(self) -> bool:
+        """True when this snapshot lets me submit (to_act, not yet submitted)."""
+        view = self.match or {}
+        me = (view.get("you") or {}).get("seat")
+        if not me or me not in (view.get("to_act") or []):
+            return False
+        seat = next((s for s in view.get("seats") or []
+                     if s.get("seat") == me), None)
+        return not (seat or {}).get("submitted", False)
+
+    def _wait_turn(self, deadline: float, poll: float,
+                   *, refresh_first: bool = False) -> dict:
+        """Poll until it is my turn again or the match is terminal."""
+        if refresh_first:
+            if poll:
+                time.sleep(poll)
+            self.poll()
+        while True:
+            if self.done or self._my_turn():
+                return self.match
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"match {self.id}: 等待轮到自己超时")
+            if poll:
+                time.sleep(poll)
+            self.poll()
+
+    # -------------------------------------------------------------- commands
+    def set_controller(self, controller, seat: str | None = None) -> dict:
+        """Switch a seat's controller (practice matches only).
+
+        E.g. hand your seat to a model: {"type": "model", "model_id": N}.
+        Returns the refreshed MatchView.
+        """
+        match_id = self._require_id()
+        seat = seat or self.you_seat
+        if not seat:
+            raise PlatformError("无法确定座位", code="no_seat")
+        self._apply(self.client._req(
+            "POST", f"/api/v2/matches/{match_id}/controller",
+            json={"seat": seat, "controller": _controller(controller)}))
+        return self.match
 
     def resign(self) -> dict:
-        d = self.client._req(
-            "POST", f"/api/v1/{self.game}/play/sessions/{self.session['id']}/leave")
-        self.poll()
-        return d
+        """Resign, or cancel the room while it is still waiting."""
+        self.client._req(
+            "POST", f"/api/v2/matches/{self._require_id()}/resign")
+        return self.poll()
 
-    def rematch(self):
-        """再来一局（06 §7 U7）：新房间复制 settings/mode/visibility，
-        p0/p1 互换，双方自动回到新对局；对已 rematch 过的房间幂等。"""
-        d = self.client._req(
-            "POST",
-            f"/api/v1/{self.game}/play/sessions/{self.session['id']}/rematch")
-        self._apply(d)
-        self.invite = d.get("invite")
-        return self
+    def rematch(self) -> dict:
+        """Offer (first call) or accept (other player) a rematch.
 
-    def replay(self) -> dict:
-        return self.client._req(
-            "GET", f"/api/v1/{self.game}/play/sessions/{self.session['id']}/replay")
+        The accepted reply carries the new match id; this client then switches
+        to it. Returns the refreshed MatchView.
+        """
+        data = self.client._req(
+            "POST", f"/api/v2/matches/{self._require_id()}/rematch")
+        self.last_rematch = data
+        if data.get("match_id"):
+            self.id = data["match_id"]
+            self.invite = None
+        return self.poll()
 
-    # ------------------------------------------------------------- status
+    # ---------------------------------------------------------------- status
+    @property
+    def snapshot(self) -> dict | None:
+        """The latest MatchView (None until created/joined/polled)."""
+        return self.match
+
     @property
     def status(self) -> str:
-        return self.session["status"] if self.session else ""
+        return (self.match or {}).get("status") or ""
 
     @property
     def done(self) -> bool:
-        return bool(self.session and self.session["status"] == "finished")
+        """True for the terminal statuses finished/cancelled/aborted."""
+        return self.status in TERMINAL_STATUS
 
     @property
     def winner(self):
-        return self.session.get("winner") if self.session else None
+        """result.winner: a seat ("p0"/"p1") or None for a draw."""
+        return ((self.match or {}).get("result") or {}).get("winner")
 
     @property
     def cause(self):
-        return self.session.get("cause") if self.session else None
+        return ((self.match or {}).get("result") or {}).get("cause")
 
     @property
     def tick(self) -> int:
-        return int(self.state.get("tick", 0)) if self.state is not None else 0
+        return int((self.match or {}).get("tick") or 0)
+
+    @property
+    def you_seat(self) -> str | None:
+        return ((self.match or {}).get("you") or {}).get("seat")
+
+    @property
+    def your_turn(self) -> bool:
+        return not self.done and self._my_turn()
+
+    @property
+    def to_act(self) -> list[str]:
+        return list((self.match or {}).get("to_act") or [])
 
     @property
     def waiting_for(self) -> str | None:
-        return self.last_response.get("waiting_for")
+        """First seat the match is still waiting on (None once it ends)."""
+        if self.done:
+            return None
+        view = self.match or {}
+        for seat in view.get("to_act") or []:
+            row = next((s for s in view.get("seats") or []
+                        if s.get("seat") == seat), None)
+            if not (row or {}).get("submitted", False):
+                return seat
+        return None
+
+    @property
+    def chat(self) -> list[dict]:
+        """Room chat from the latest snapshot (players only)."""
+        return list((self.match or {}).get("chat") or [])

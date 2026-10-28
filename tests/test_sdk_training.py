@@ -74,11 +74,14 @@ def test_train_export_upload_and_model_play(base_url, tmp_path):
         client = PlatformClient(base_url)
         client.register("training_smoke", "local-smoke-password")
         model = client.upload_model(str(path), "tetris", "smoke-trained")
-        response = client._req("POST", "/api/v1/tetris/play/sessions", json={
-            "seed": 7, "controller": {"type": "model", "model_id": model["id"]}})
-        sid = response["session"]["id"]
-        result = client._req("POST", f"/api/v1/tetris/play/sessions/{sid}/actions", json={"actions": None})
-        assert "state" in result
+        # v2 Match: the uploaded model drives my seat (design 17 M4)
+        created = client._req("POST", "/api/v2/matches", json={
+            "game": "tetris",
+            "seats": [{"seat": "p0", "occupant": "me",
+                       "controller": {"type": "model", "model_id": model["id"]}}]})
+        assert created["seats"][0]["controller"]["type"] == "model"
+        view = client._req("GET", f"/api/v2/matches/{created['id']}")
+        assert "frame" in view and view["game"] == "tetris"
     finally:
         remote.close()
 

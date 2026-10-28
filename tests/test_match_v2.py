@@ -258,14 +258,42 @@ def test_private_room_invites_and_visibility():
     assert r.status_code == 200
     assert client.get(f"/api/v2/matches/{mid}", headers=c["h"]).status_code == 403
     assert client.get(f"/api/v2/matches/{mid}/frames", headers=c["h"]).status_code == 403
-    assert client.get(f"/api/v2/matches/{mid}/chat", headers=c["h"]).status_code == 403
-    assert client.post(f"/api/v2/matches/{mid}/chat", json={"text": "gg"}, headers=a["h"]).status_code == 200
-    msgs = client.get(f"/api/v2/matches/{mid}/chat", headers=b["h"]).json()["messages"]
-    assert [m["text"] for m in msgs] == ["gg"]
-    # The chat itself stays players-only; the timeline only gets a mark.
-    assert [(m["kind"], m["seat"]) for m in _view(a, mid)["marks"]] == [("chat", "p0")]
+    # Chat moved into the event stream: the polling GET is gone, POST stays.
+    assert client.get(f"/api/v2/matches/{mid}/chat", headers=b["h"]).status_code == 404
+    assert client.post(f"/api/v2/matches/{mid}/chat", json={"text": "gg"}, headers=c["h"]).status_code == 403
+    sent = client.post(f"/api/v2/matches/{mid}/chat", json={"text": "  gg  "}, headers=a["h"])
+    assert sent.status_code == 200, sent.text
+    message = sent.json()["message"]
+    assert message["text"] == "gg" and message["seat"] == "p0" and message["from"] == a["user"]["id"]
+    assert message["name"] == a["user"]["username"] and message["tick"] == 0
+    # Both players see the message in their next snapshot; the timeline keeps
+    # a chat mark that carries no message text.
+    seen = _view(b, mid)["chat"]
+    assert [(m["id"], m["from"], m["text"]) for m in seen] == [(message["id"], a["user"]["id"], "gg")]
+    assert [(m["kind"], m["seat"]) for m in _view(b, mid)["marks"]] == [("chat", "p0")]
     frames = client.get(f"/api/v2/matches/{mid}/frames", headers=b["h"]).json()["frames"]
     assert [(m["kind"], m["seat"]) for m in frames[0]["marks"]] == [("chat", "p0")]
+
+
+def test_chat_spectators_and_finished_players():
+    a, b, c = _user(), _user(), _user()
+    mid = _create(a, game="microrts", seats=[
+        {"seat": "p0", "occupant": "me", "controller": {"type": "human"}},
+        {"seat": "p1", "occupant": None, "controller": {"type": "human"}},
+    ], mode="casual", visibility="public")["id"]
+    assert client.post(f"/api/v2/matches/{mid}/seats/p1/join", json={}, headers=b["h"]).status_code == 200
+    # A spectator can read the public match but never the chat.
+    spectator = _view(c, mid)
+    assert spectator["you"]["seat"] is None and spectator["chat"] == []
+    assert client.post(f"/api/v2/matches/{mid}/chat", json={"text": "hi"}, headers=c["h"]).status_code == 403
+    assert client.post(f"/api/v2/matches/{mid}/chat", json={"text": "hi"}, headers=b["h"]).status_code == 200
+    assert [m["text"] for m in _view(a, mid)["chat"]] == ["hi"]
+    assert _view(c, mid)["chat"] == []
+    # Chat is only for live matches: the polling GET is gone and a finished
+    # match rejects POSTs.
+    assert client.post(f"/api/v2/matches/{mid}/resign", headers=b["h"]).status_code == 200
+    late = client.post(f"/api/v2/matches/{mid}/chat", json={"text": "bye"}, headers=a["h"])
+    assert late.status_code == 409 and late.json()["detail"]["code"] == "match_over"
 
 
 def test_deadline_auto_waits_then_forfeits(monkeypatch):

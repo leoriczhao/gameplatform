@@ -1,11 +1,123 @@
 # GamePlatform Python SDK
 
+**SDK 1.0 是破坏性大版本**：对局协议从 v1 会话接口迁移到 v2 matches（设计 17 §5）。
+SDK 1.0 要求平台版本为 **M4（对局舞台 v2 全量上线）或更新**；旧平台没有
+`/api/v2/matches`，SDK 不再回退到已删除的 v1 会话接口。
+
 在仓库根目录安装：
 
 ```sh
 pip install -e sdk
 # 运行仓库训练脚本还需要 torch；ONNX 导出另需 onnx/onnxruntime。
 ```
+
+## 平台 API 客户端：账号、模型与 v2 对局
+
+```python
+from gameplatform import PlatformClient
+
+c = PlatformClient(base_url="https://games.cree1p.com")
+c.login("alice", "secret")                  # 或 c.register(...) / c.guest()
+
+model = c.upload_model("my_dqn.onnx", game="snake", name="我的DQN")
+c.eval_model(model["id"])
+
+# 模型对战：两个 model 座位，kind/mode 由服务端推导；返回对局 uid
+uid = c.create_match(game="microrts", model_a=model["id"], model_b="ai:light_rush")
+view = c.wait_match(uid)                    # 轮询 v2 快照直到终局
+print(view["status"], view["result"])
+
+# 回放：/frames 分页组装
+replay = c.match_replay(uid)
+print(replay["total"], replay["frames"][0]["tick"])
+```
+
+### PlatformClient 0.x → 1.0 变更
+
+| 0.x | 1.0 |
+|---|---|
+| `create_match(game, model_a, model_b)` 返回 int match_id | 返回对局 **uid**（str）；POST `/api/v2/matches`，p0/p1 均为 model 座位 |
+| `get_match(match_id)` 返回 v1 match | `get_match(uid)` 返回 v2 **MatchView** 快照 |
+| `wait_match(match_id)` 轮询 v1 status | `wait_match(uid)` 轮询 v2 快照 status（finished/cancelled/aborted 为终局） |
+| `match_replay(match_id)` 返回 v1 replay | `match_replay(uid)` 返回 `{id, frames, total}`，用 `/frames` 分页 |
+| `create_room(...)` 返回 SessionClient | `create_room(...)` 返回 **MatchView**（`view["id"]` 为对局 id，`view["invite"]` 为邀请码） |
+| `list_rooms` | `lobby(game, mode=None)` |
+| `join_room(game, room_id, invite)` | `join_room(uid, invite=None, seat="p1")` |
+| `join_quick_match` | `quick_match(game, mode="casual")` → 对局 uid |
+| `queue_status` / `cancel_queue`（v1 路径） | 同语义，走 `/api/v2/{game}/matchmaking/*` |
+| `active_games()` | `my_live_matches()` → `[MatchView]`（`GET /api/v2/me/matches`） |
+| `chat_send` / `chat_since`（v1 会话聊天） | `send_chat(uid, text)`；读取走 `MatchView["chat"]` / SSE `chat` 事件 |
+
+`my_matches()` **保留 v1 历史列表**（`GET /api/v1/matches`，平台保留该只读接口）：
+它只返回已结束对局的历史记录，不含进行中/可重连的对局。进行中的对局用
+`my_live_matches()`（v2 `GET /api/v2/me/matches`）。
+
+### SessionClient：v2 对局客户端（语义大改）
+
+0.x 的 `SessionClient` 包装 v1 play 会话；1.0 中它是
+`GET /api/v2/matches/{uid}` 的有状态客户端：`self.match` 始终是最近一次
+MatchView，`act()` 提交 `{tick, action}` 并阻塞到再次轮到自己或终局。
+
+```python
+# 单机练习：单座游戏直接开始；双座游戏默认对手由服务端决定
+s = c.session("snake")
+s.start_pve(seed=42)
+while not s.done:
+    view = s.act(pick_action(s.match))      # 返回最新 MatchView
+print(s.status, s.winner, s.cause, s.tick, s.waiting_for)
+
+# 双座游戏指定 AI 对手 / 让模型代打自己
+s = c.session("microrts")
+s.start_pve(opponent="worker_rush",
+            controller={"type": "model", "model_id": 12})
+
+# PvP：创建（私密房拿到邀请码）→ 对方凭 uid + 邀请码入座
+host = c.session("microrts").create_pvp(mode="casual", visibility="private")
+print(host.id, host.invite)
+guest = c.session("microrts").join_pvp(host.id, invite=host.invite)
+
+# 快速匹配（v2 队列；返回 match uid），然后附着到该对局
+uid = c.quick_match("microrts", mode="ranked")
+s = c.session("microrts", uid)
+
+# 认输 / 再来一局 / 回放
+s.resign(); s.rematch(); replay = s.replay()
+```
+
+SessionClient API：`start_pve(opponent, controller, seed)`、
+`create_pvp(seed, mode, visibility)`、`join_pvp(match_id, invite, seat)`、
+`act(actions)`、`poll()`、`resign()`、`rematch()`、`replay()`、
+`set_controller(controller, seat=None)`；属性 `match`、`id`、`invite`、
+`status`、`done`、`winner`、`cause`、`tick`、`you_seat`、
+`your_turn`、`to_act`、`waiting_for`、`chat`。
+
+### v1 → v2 字段映射
+
+| v1 会话字段 | v2 MatchView |
+|---|---|
+| session.id | `view["id"]` |
+| side / session.side | `view["you"]["seat"]` |
+| state | `view["frame"]` |
+| tick | `view["tick"]` |
+| status（finished 等） | `view["status"]`：waiting / active / finished / aborted / cancelled |
+| winner / cause | `view["result"]["winner"]` / `view["result"]["cause"]` |
+| session.invite | `view["invite"]` |
+| expected_tick（可选乐观锁） | `tick` 必填，作为幂等键（同一 seat+tick 重复提交覆盖而不推进） |
+| actions 响应里的 state | 202 `{accepted, seq}` 确认；结果只从快照/流里读 |
+| 会话 replay | `/api/v2/matches/{uid}/frames`（`next` 分页） |
+| waiting_for | `SessionClient.waiting_for`（to_act 中尚未提交的座位） |
+| 聊天 GET 轮询 | `MatchView["chat"]` / SSE `chat` 事件；发送仍为 `POST /chat` |
+
+`act()` 的轮询语义：提交前基于上次快照的 `tick`；收到 202 后轮询快照，
+直到再次轮到我（`you.seat` 在 `to_act` 中且该 tick 尚未提交）或终局。
+`stale_tick`（409）会自动刷新快照并重试（最多 3 次）；`not_to_act` 会先等到
+轮到自己。
+
+### 错误
+
+`PlatformError` 带 `code`、`status`、`detail` 属性，`code` 对应 v2 机器
+可读错误码：`stale_tick`、`not_to_act`、`match_over`、`not_your_seat`、
+`bad_controller` 等。
 
 ## 本地训练（默认）：游戏包在你的进程里运行
 
@@ -37,7 +149,7 @@ parity_check("snake", base_url="https://games.cree1p.com")  # 本地与线上逐
 - **开发自己的游戏包**：`load_game("./my-game")` 或 `LocalVecEnv("./my-game")`
   直接加载目录（需要 PyYAML），不需要服务器。
 - 两个都使用绝对导入、且模块同名的游戏包，不能在同一个进程里同时加载
-  （平台 worker 同样把包目录放进 `sys.path`）。官方包使用相对导入，不受影响。
+  （平台 worker 同样把包目录放进 `sys.path`）。官方游戏包使用相对导入，不受影响。
 
 ## 远程环境：官方 OpenEnv WebSocket
 
@@ -46,7 +158,8 @@ parity_check("snake", base_url="https://games.cree1p.com")  # 本地与线上逐
 SDK 固定依赖 `openenv==0.4.1`，每个槽使用一个官方
 `GenericEnvClient(...).sync()`，连接 `/api/openenv/{game}/ws`。
 不再调用旧环境 HTTP 接口，也不接受无状态 `{state, action}` 信封。
-账号、模型上传和对局等 `PlatformClient` 功能仍使用各自的平台 HTTP API。
+账号、模型上传和对局等 `PlatformClient` 功能使用平台 HTTP API；对局协议为
+v2（见上）。
 
 ```python
 import numpy as np
@@ -107,14 +220,19 @@ Python 要求为 >=3.10，与 OpenEnv 0.4.1 的包 metadata 一致。官方 Open
 包含 Gradio/httpx；本机带裸 IPv6/方括号 IPv6 的 `NO_PROXY/no_proxy` 配置
 （如 `::1,[::1]`）会触发上游 `httpx.InvalidURL: Invalid port: ':1]'`。
 SDK 不修改全局代理变量；针对 loopback 测试可在进程级使用下面的合法配置。
-本机还有无关 ROS pytest 自动插件缺依赖，所以 smoke 显式禁用自动插件加载：
+本机 `PYTHONPATH` 指向 ROS 的 site-packages，pytest 会因此自动加载缺依赖的 ROS
+插件；下面的命令用 `env -u PYTHONPATH` 规避（等价于设置
+`PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`）：
 
 ```sh
-NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost \
-PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
-CUDA_VISIBLE_DEVICES="" .venv/bin/python -m pytest tests/test_sdk_training.py -q
+env -u PYTHONPATH .venv/bin/python -m pytest tests/test_sdk_v2.py -q   # 纯离线：只用假传输
+
+env -u PYTHONPATH NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost \
+OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 CUDA_VISIBLE_DEVICES="" \
+.venv/bin/python -m pytest tests/test_sdk_training.py -q
 ```
 
-在仓库根目录执行；测试使用 `live_server` 隔离 fixture，不替换线上服务。
+在仓库根目录执行；`tests/test_sdk_v2.py` 在导入 SDK 前会清理 `NO_PROXY` 里的
+非法 IPv6 条目（原因同上），因此上面的纯离线命令在没有手工设置代理变量时也能通过。
+`tests/test_sdk_training.py` 使用 `live_server` 隔离 fixture，不替换线上服务。
 远端训练若依赖企业代理，按实际目标配置合法的代理排除项，而非照搬 loopback 配置。
-

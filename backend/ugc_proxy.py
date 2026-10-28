@@ -1,7 +1,7 @@
 """ProxyAdapter (11 P2): a sandboxed UGC game wearing the EnvAdapter face.
 
 Once registered into `registry`, every existing platform surface (env API,
-play sessions, scores, AI endpoint, ratings, watch/replay) works unchanged.
+scores, AI endpoint, ratings, v2 matches / stage) works unchanged.
 AI 咨询端点需要一个 pydantic 模型；这里提供一个通用模型并把调用转发给
 沙箱内的 ai_action。
 """

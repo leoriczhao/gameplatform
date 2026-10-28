@@ -1,16 +1,15 @@
 /* 对局状态与命令（docs/design/17 §7.6）。
 
    数据流只有一条：首屏用 GET /api/v2/matches/{id} 拿快照，之后所有变化
-   都来自 SSE 事件流，命令（出招 / 认输 / 再来一局 / 入座 / 托管）只返回
-   确认，结果统一从流里到达（§5.1）。聊天是 REST 轮询（M1 实施记录），
-   所以这里单独维护 chat 列表。 */
+   都来自 SSE 事件流，命令（出招 / 认输 / 再来一局 / 入座 / 托管 / 聊天）
+   只返回确认，结果统一从流里到达（§5.1）。M4 起聊天也走这条流：快照里的
+   chat 是权威历史，chat 事件逐条追加；POST /chat 只做按 id 去重的乐观追加，
+   不再 REST 轮询。 */
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getJson, post } from "../api.js";
 import { applySnapshot, reduceMatch } from "./reduceMatch.js";
 import { openMatchStream } from "./matchStream.js";
-
-const CHAT_POLL_MS = 2000;
 
 const IDLE_CONNECTION = { state: "idle", attempt: 0, status: null };
 
@@ -18,9 +17,7 @@ export function useMatch(uid, { token = "", enabled = true } = {}) {
   const [view, setView] = useState(null);
   const [error, setError] = useState(null);
   const [connection, setConnection] = useState(IDLE_CONNECTION);
-  const [chat, setChat] = useState([]);
   const viewRef = useRef(null);
-  const chatSince = useRef(0);
 
   useEffect(() => {
     if (!uid || !enabled) {
@@ -28,17 +25,14 @@ export function useMatch(uid, { token = "", enabled = true } = {}) {
       setView(null);
       setError(null);
       setConnection(IDLE_CONNECTION);
-      setChat([]);
       return undefined;
     }
     let cancelled = false;
     const controller = new AbortController();
     let stream = null;
     viewRef.current = null;
-    chatSince.current = 0;
     setView(null);
     setError(null);
-    setChat([]);
     setConnection({ state: "connecting", attempt: 0, status: null });
 
     const applyEvent = (event) => {
@@ -89,39 +83,6 @@ export function useMatch(uid, { token = "", enabled = true } = {}) {
     };
   }, [uid, token, enabled]);
 
-  /* 聊天只在"我是玩家且是多人对局"时轮询；失败不打断舞台。 */
-  useEffect(() => {
-    const seated = Boolean(view?.you?.seat);
-    const multi = (view?.seats?.length ?? 0) > 1;
-    if (!uid || !enabled || !seated || !multi) return undefined;
-    let stopped = false;
-    let timer = null;
-    const poll = async () => {
-      try {
-        const data = await getJson(
-          `/api/v2/matches/${uid}/chat?since=${chatSince.current}`,
-          token,
-        );
-        if (stopped) return;
-        if (Array.isArray(data?.messages) && data.messages.length) {
-          setChat((prev) => {
-            const known = new Set(prev.map((message) => message.id));
-            return [...prev, ...data.messages.filter((message) => !known.has(message.id))];
-          });
-        }
-        if (Number.isFinite(data?.next_since)) chatSince.current = data.next_since;
-      } catch (err) {
-        /* 聊天不可用（未入座 / 已结束）时静默 */
-      }
-      if (!stopped) timer = setTimeout(poll, CHAT_POLL_MS);
-    };
-    poll();
-    return () => {
-      stopped = true;
-      if (timer) clearTimeout(timer);
-    };
-  }, [uid, token, enabled, view?.you?.seat, view?.seats?.length]);
-
   const submit = useCallback(async (action) => {
     const current = viewRef.current;
     if (!current) throw new Error("对局还没有载入");
@@ -152,12 +113,16 @@ export function useMatch(uid, { token = "", enabled = true } = {}) {
     [uid, token],
   );
 
+  /* POST /chat 只返回确认：把返回的消息当作一次本地 chat 事件走 reducer，
+     按 id 去重乐观追加；SSE 随后推送同一条 chat 事件时会被 reducer 去重。 */
   const sendChat = useCallback(async (text) => {
     const data = await post(`/api/v2/matches/${uid}/chat`, { text }, token);
     const message = data?.message;
-    if (message) {
-      setChat((prev) => (prev.some((item) => item.id === message.id) ? prev : [...prev, message]));
-      chatSince.current = Math.max(chatSince.current, Number(message.id) || chatSince.current);
+    const current = viewRef.current;
+    if (message && current) {
+      const next = reduceMatch(current, { type: "chat", seq: current.seq, message });
+      viewRef.current = next;
+      setView(next);
     }
     return message;
   }, [uid, token]);
@@ -166,7 +131,6 @@ export function useMatch(uid, { token = "", enabled = true } = {}) {
     view,
     error,
     connection,
-    chat,
     actions: { submit, resign, rematch, join, setController, sendChat },
   };
 }

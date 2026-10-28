@@ -1,30 +1,24 @@
-"""Match records, ELO ratings, and the async model-vs-model match worker.
+"""Match records, ELO ratings, and v2 match persistence.
 
-Design: docs/design/03 + 04.
+Design: docs/design/17（v2 对局）+ 03（历史 v1 记录）.
 
-- Every finished PvP session is recorded as a match and updates both players'
-  ratings (ELO, K=32, start 1200) — only for registered users.
-- Model-vs-model matches run in a background worker pool; the result and
-  replay are stored for later viewing.
+- v2 matches (PvE/PvP/model seats) are created in SQLite on creation
+  (insert_v2), get their seats/frames persisted, and finish with update_v2.
+- The matches table also keeps archived v1 rows (kind pvp/pve/model_vs_model
+  with a replay JSON column). Those columns and rows stay readable for the
+  history APIs and the one-off M4 migration script; no v1 writer remains.
+- ELO bookkeeping (K=32, start 1200) is shared by v2 ranked matches.
 """
 from __future__ import annotations
 
 import gzip
 import json
 import sqlite3
-import threading
 import time
 from pathlib import Path
 
-import events
-import inference
-import models as model_store
-from registry import GAMES, resolve
-
 SCORES_DB = Path(__import__("os").environ.get("SCORES_DB", "/data/scores.db"))
 
-MATCH_STEP_CAP = 1500
-MATCH_WORKER_LIMIT = threading.BoundedSemaphore(8)
 _K = 32
 _START_RATING = 1200
 
@@ -37,12 +31,12 @@ def _db() -> sqlite3.Connection:
         """CREATE TABLE IF NOT EXISTS matches (
                id INTEGER PRIMARY KEY AUTOINCREMENT,
                game TEXT NOT NULL,
-               kind TEXT NOT NULL,           -- pvp | model_vs_model
+               kind TEXT NOT NULL,           -- pvp | pve | model_vs_model
                players TEXT NOT NULL,        -- JSON [{user_id, name, side}]
                models TEXT NOT NULL DEFAULT '[]',  -- JSON [model_id, ...]
-               status TEXT NOT NULL,         -- queued | running | finished | failed
-               result TEXT,                  -- JSON {winner, cause, damage}
-               replay TEXT,                  -- JSON moves
+               status TEXT NOT NULL,         -- waiting | active | finished | ...
+               result TEXT,                  -- JSON {winner, cause, ...}
+               replay TEXT,                  -- archived v1 rows only (M4 keeps the column)
                created_at REAL NOT NULL,
                finished_at REAL
            )"""
@@ -283,85 +277,7 @@ def abort_unfinished_v2(cause: str = "server_restart") -> int:
         conn.close()
 
 
-# ----------------------------------------------------------------- records
-
-def record_pvp_finish(sess) -> int:
-    """Store a finished PvP session as a match; update ratings.
-
-    casual rooms are recorded but do NOT touch ELO (D10); ranked rooms
-    update both players' ratings as before."""
-    players = [
-        {"user_id": sess.p0["id"], "name": sess.p0["nickname"] or sess.p0["username"],
-         "side": "p0"},
-        {"user_id": sess.p1["id"], "name": sess.p1["nickname"] or sess.p1["username"],
-         "side": "p1"},
-    ]
-    result = {"winner": sess.winner, "cause": sess.cause,
-              "damage": sess.state.get("damage", [0, 0]),
-              "mode": getattr(sess, "mode", "ranked")}
-    # replay carries the map seed so the replay viewer can rebuild every
-    # state locally from the moves via the env API (07 M4 note)
-    seed = sess.seed
-    replay = {"schema_version": 1,
-              "game_version": getattr(sess, "game_version", None),
-              "seed": seed,
-              "options": getattr(sess, "env_options", None),
-              "moves": sess.moves}
-    conn = _db()
-    try:
-        cur = conn.execute(
-            "INSERT INTO matches (game, kind, players, models, status, result, "
-            "replay, created_at, finished_at) VALUES (?,?,?,?,?,?,?,?,?)",
-            (sess.game, "pvp", json.dumps(players), "[]", "finished",
-             json.dumps(result), json.dumps(replay),
-             sess.created_at, time.time()))
-        conn.commit()
-        match_id = cur.lastrowid
-    finally:
-        conn.close()
-    if getattr(sess, "mode", "ranked") == "ranked":
-        update_ratings(sess.game, sess.p0["id"], sess.p1["id"], sess.winner)
-    # XP 等由 match_finished 订阅方处理（08 §1 / 19 §5；每局只发一次）
-    events.emit_match_finished(sess)
-    return match_id
-
-
-def record_pve_finish(sess) -> int | None:
-    """Store a finished PvE session as a match (kind=pve, 11 P4).
-
-    Registered users only: a guest has no account to attach the history to.
-    No ELO (PvE is single-player); XP is awarded separately in step_session.
-    The replay keeps seed + moves so the viewer rebuilds every state locally."""
-    uid = sess.principal.get("id") if sess.principal else None
-    if not uid:
-        return None
-    players = [{"user_id": uid,
-                "name": sess.principal.get("nickname")
-                        or sess.principal.get("username"),
-                "side": "p0"}]
-    result = {"winner": sess.winner, "cause": sess.cause,
-              "controller": bool(getattr(sess, "controller", None))}
-    if isinstance(sess.state, dict) and "score" in sess.state:
-        result["score"] = sess.state["score"]
-    seed = sess.seed
-    replay = {"schema_version": 1,
-              "game_version": getattr(sess, "game_version", None),
-              "seed": seed,
-              "options": getattr(sess, "env_options", None),
-              "moves": sess.moves}
-    conn = _db()
-    try:
-        cur = conn.execute(
-            "INSERT INTO matches (game, kind, players, models, status, result, "
-            "replay, created_at, finished_at) VALUES (?,?,?,?,?,?,?,?,?)",
-            (sess.game, "pve", json.dumps(players), "[]", "finished",
-             json.dumps(result), json.dumps(replay),
-             sess.created_at, time.time()))
-        conn.commit()
-        return cur.lastrowid
-    finally:
-        conn.close()
-
+# ------------------------------------------------------------------ history
 
 def get_match(match_id: int) -> dict | None:
     conn = _db()
@@ -372,39 +288,6 @@ def get_match(match_id: int) -> dict | None:
     finally:
         conn.close()
     return _row(row, columns) if row else None
-
-
-def get_match_replay(match_id: int) -> dict | None:
-    """Normalize one finished match into the public replay contract.
-
-    The viewer initializes ``seed`` through the Environment API and applies
-    ``moves`` in order. Legacy rows stored as a plain move list remain readable
-    with ``seed=None``.
-    """
-    m = get_match(match_id)
-    if m is None or m["status"] != "finished":
-        return None
-    raw = m.get("replay") or []
-    game_version, seed, options, moves = None, None, None, raw
-    if isinstance(raw, dict):
-        game_version = raw.get("game_version")
-        seed = raw.get("seed")
-        options = raw.get("options")
-        moves = raw.get("moves") or []
-    result = m.get("result") or {}
-    return {"schema_version": 1,
-            "match_id": m["id"], "game": m["game"], "kind": m["kind"],
-            "game_version": game_version,
-            "players": m["players"],
-            "models": m["models"],
-            "result": result,
-            "mode": result.get("mode") if isinstance(result, dict) else None,
-            "seed": seed, "options": options, "moves": moves,
-            "created_at": m["created_at"],
-            "finished_at": m["finished_at"]}
-
-
-
 
 
 def top_ratings(game: str, limit: int = 20) -> list[dict]:
@@ -423,7 +306,7 @@ def top_ratings(game: str, limit: int = 20) -> list[dict]:
 
 
 def list_matches(user_id: int) -> list[dict]:
-    """Matches where the user played or owns a participating model."""
+    """Matches where the user played (v2 seats are projected into players)."""
     conn = _db()
     try:
         cur = conn.execute(
@@ -436,123 +319,6 @@ def list_matches(user_id: int) -> list[dict]:
     out = []
     for r in rows:
         m = _row(r, columns)
-        mine = any(p.get("user_id") == user_id for p in m["players"]) \
-            or user_id in [mod.get("owner_id") for mod in (m.get("model_meta") or [])]
-        if mine:
+        if any(p.get("user_id") == user_id for p in m["players"]):
             out.append(m)
     return out
-
-
-# ------------------------------------------------------- model vs model worker
-
-def create_model_match(game: str, principal: dict, model_a: int, model_b) -> int:
-    """model_b: model id (int) or "ai:<strategy>". Returns match id.
-
-    13 G3：能力声明制——游戏需声明模型契约；ai: 对手需声明 opponents；
-    模型 vs 模型需声明 pvp_options（双人模式开局）。"""
-    if not inference.supports_models(game):
-        raise ValueError(f"游戏 {game!r} 未声明模型契约，不支持模型对战")
-    adapter = GAMES[game]
-    ma = model_store.get_model(int(model_a))
-    if ma is None or ma["status"] != "active" or ma["owner_id"] != principal["id"]:
-        raise ValueError("model_a 不存在或不是你的模型")
-    model_meta = [{"type": "model", "side": "p0",
-                   "model_id": ma["id"], "name": ma["name"],
-                   "owner_id": ma["owner_id"]}]
-    opponent_desc = None
-    if isinstance(model_b, str) and model_b.startswith("ai:"):
-        strategy = model_b[3:]
-        opponents = getattr(adapter, "opponents", None) or []
-        if strategy not in opponents:
-            raise ValueError(f"unknown strategy {strategy!r} "
-                             f"(choose from {opponents})")
-        opponent_desc = {"type": "ai", "strategy": strategy}
-        model_meta.append({"type": "ai", "side": "p1",
-                           "strategy": strategy})
-    else:
-        if not getattr(adapter, "pvp_options", None):
-            raise ValueError(f"游戏 {game!r} 不支持模型 vs 模型（未声明双人模式）")
-        mb = model_store.get_model(int(model_b))
-        if mb is None or mb["status"] != "active":
-            raise ValueError("model_b 不存在")
-        opponent_desc = {"type": "model", "model_id": mb["id"]}
-        model_meta.append({"type": "model", "side": "p1",
-                           "model_id": mb["id"], "name": mb["name"],
-                           "owner_id": mb["owner_id"]})
-
-    conn = _db()
-    try:
-        cur = conn.execute(
-            "INSERT INTO matches (game, kind, players, models, status, created_at) "
-            "VALUES (?,?,?,?,?,?)",
-            (game, "model_vs_model",
-             json.dumps([{"user_id": principal["id"],
-                          "name": principal["nickname"] or principal["username"],
-                          "side": "owner"}]),
-             json.dumps(model_meta), "queued", time.time()))
-        conn.commit()
-        match_id = cur.lastrowid
-    finally:
-        conn.close()
-
-    t = threading.Thread(target=_run_model_match, args=(match_id, game, ma,
-                                                        opponent_desc, adapter.meta.get("version")),
-                         daemon=True)
-    t.start()
-    return match_id
-
-
-def _run_model_match(match_id: int, game: str, model_a: dict, opponent: dict,
-                     game_version: str | None = None) -> None:
-    with MATCH_WORKER_LIMIT:
-        conn = _db()
-        try:
-            conn.execute("UPDATE matches SET status='running' WHERE id=?",
-                         (match_id,))
-            conn.commit()
-        finally:
-            conn.close()
-        try:
-            adapter = resolve(game, game_version)
-            seed = int(time.time_ns() % (1 << 30))
-            options = getattr(adapter, "pvp_options", None)
-            meta = getattr(adapter, "meta", None) or {}
-            game_version = meta.get("version")
-            state = adapter.new_state(seed, options)
-            sess_a = model_store.load_session(model_a)
-            sess_b = None
-            if opponent["type"] == "model":
-                model_b = model_store.get_model(int(opponent["model_id"]))
-                sess_b = model_store.load_session(model_b)
-            moves = []
-            for _ in range(MATCH_STEP_CAP):
-                if state.get("done"):
-                    break
-                a = inference.model_action(game, sess_a, state, owner=0, adapter=adapter)
-                if opponent["type"] == "model":
-                    b = inference.model_action(game, sess_b, state, owner=1, adapter=adapter)
-                else:
-                    b = adapter.opponent_action(
-                        state, {"type": "ai", "strategy": opponent["strategy"]})
-                moves.append({"tick": state.get("tick", 0), "action": {"p0": a, "p1": b}})
-                state = adapter.step_state(state, {"p0": a, "p1": b})
-            result = {"winner": state.get("winner"), "cause": state.get("cause"),
-                      "damage": state.get("damage", [0, 0]),
-                      "tick": state.get("tick", 0)}
-            status = "finished"
-        except Exception as e:  # model failure -> record and mark failed
-            result = {"error": str(e)}
-            status = "failed"
-        conn = _db()
-        try:
-            replay = {"schema_version": 1, "game_version": game_version,
-                      "seed": seed, "options": options, "moves": moves} \
-                if "moves" in dir() and "seed" in dir() else []
-            conn.execute(
-                "UPDATE matches SET status=?, result=?, replay=?, finished_at=? "
-                "WHERE id=?", (status, json.dumps(result),
-                               json.dumps(replay),
-                               time.time(), match_id))
-            conn.commit()
-        finally:
-            conn.close()

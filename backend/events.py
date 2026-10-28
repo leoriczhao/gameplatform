@@ -27,11 +27,3 @@ def emit(name: str, payload) -> None:
             handler(payload)
         except Exception:
             log.exception("event %s: subscriber %r failed", name, handler)
-
-
-def emit_match_finished(sess) -> None:
-    """Emit match_finished at most once per session."""
-    if getattr(sess, "_finish_emitted", False):
-        return
-    sess._finish_emitted = True
-    emit("match_finished", sess)

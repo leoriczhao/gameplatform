@@ -1,4 +1,8 @@
-"""Growth & leaderboard tests (v1.0-c, numbers in docs/design/08)."""
+"""Growth & leaderboard tests (v1.0-c, numbers in docs/design/08).
+
+Matches are created through the v2 Match protocol after the M4 cutover; the
+XP/ELO/streak/leaderboard assertions are unchanged.
+"""
 import os
 import sys
 import tempfile
@@ -30,13 +34,22 @@ def _h(u):
     return {"Authorization": f"Bearer {u['token']}"}
 
 
-def _pvp_room(a, b, mode="casual"):
-    r = client.post("/api/v1/microrts/play/rooms",
-                    json={"mode": mode, "visibility": "private"}, headers=_h(a))
-    sid = r.json()["session"]["id"]
-    client.post(f"/api/v1/microrts/play/rooms/{sid}/join",
-                json={"invite": r.json()["invite"]}, headers=_h(b))
-    return sid
+def _pvp_match(a, b, mode="casual"):
+    """A hosts a v2 room, B joins it; returns the match uid."""
+    r = client.post("/api/v2/matches", headers=_h(a), json={
+        "game": "microrts", "mode": mode,
+        "seats": [{"seat": "p0", "occupant": "me", "controller": {"type": "human"}},
+                  {"seat": "p1", "occupant": None, "controller": {"type": "human"}}]})
+    assert r.status_code == 201, r.text
+    mid = r.json()["id"]
+    r = client.post(f"/api/v2/matches/{mid}/seats/p1/join", json={}, headers=_h(b))
+    assert r.status_code == 200, r.text
+    return mid
+
+
+def _resign(u, mid):
+    r = client.post(f"/api/v2/matches/{mid}/resign", headers=_h(u))
+    assert r.status_code == 200, r.text
 
 
 def _stats(u):
@@ -63,11 +76,9 @@ def test_pvp_xp_stats_streak_and_history():
     B = _user("stab1")
 
     # game 1 (casual): B resigns -> A wins. A +25, B +10
-    sid1 = _pvp_room(A, B, "casual")
-    client.post(f"/api/v1/microrts/play/sessions/{sid1}/leave", headers=_h(B))
+    _resign(B, _pvp_match(A, B, "casual"))
     # game 2 (ranked): B resigns again -> A wins. A +25, B +10; ELO + history
-    sid2 = _pvp_room(A, B, "ranked")
-    client.post(f"/api/v1/microrts/play/sessions/{sid2}/leave", headers=_h(B))
+    _resign(B, _pvp_match(A, B, "ranked"))
 
     sa = _stats(A)
     sb = _stats(B)
@@ -97,19 +108,14 @@ def test_pvp_xp_stats_streak_and_history():
 
 def test_pve_finish_awards_xp():
     A = _user("staa2")
-    r = client.post("/api/v1/snake/play/sessions",
-                    json={"kind": "pve", "seed": 5}, headers=_h(A))
-    sid = r.json()["session"]["id"]
-    # keep going right until the snake hits the wall (deterministic)
-    done = False
-    for _ in range(50):
-        r = client.post(f"/api/v1/snake/play/sessions/{sid}/actions",
-                        json={"actions": 1}, headers=_h(A))
-        assert r.status_code == 200, r.text
-        if r.json()["done"]:
-            done = True
-            break
-    assert done, "snake session should end within 50 wall-steps"
+    r = client.post("/api/v2/matches", headers=_h(A), json={"game": "snake"})
+    assert r.status_code == 201, r.text
+    mid, tick = r.json()["id"], 0
+    while client.get(f"/api/v2/matches/{mid}", headers=_h(A)).json()["status"] == "active":
+        r = client.post(f"/api/v2/matches/{mid}/actions", headers=_h(A),
+                        json={"tick": tick, "action": 1})
+        assert r.status_code == 202, r.text
+        tick += 1
     s = _stats(A)
     print("pve xp:", s["xp"])
     assert s["xp"] >= 5
@@ -118,8 +124,7 @@ def test_pve_finish_awards_xp():
 def test_leaderboards_total_and_weekly():
     A = _user("staa3")
     B = _user("stab3")
-    sid = _pvp_room(A, B, "ranked")
-    client.post(f"/api/v1/microrts/play/sessions/{sid}/leave", headers=_h(B))
+    _resign(B, _pvp_match(A, B, "ranked"))
 
     r = client.get("/api/v1/leaderboards/microrts?scope=weekly", headers=_h(A))
     assert r.status_code == 200, r.text

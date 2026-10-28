@@ -2,7 +2,7 @@
 
     edge  HTTP adapters + composition root: may import any layer
     L3    business: accounts, social, growth, boards, UGC workflow
-    L2    match domain: sessions, matches, matchmaking, models, events
+    L2    match domain: match_engine, matches, matchmaking, models, events
     L1    server runtime: sandbox, registry, package pipeline, inference
     L0    gamekernel: stdlib + numpy only
 
@@ -18,10 +18,10 @@ ROOT = Path(__file__).resolve().parents[1]
 LAYERS = {
     "edge": {"main", "openenv_native", "platform_api", "game_routes", "api_limits",
              "api_schemas", "admin_routes", "auth_routes", "matches_routes",
-             "matchmaking_routes", "model_routes", "play_routes", "social_routes",
-             "stats_routes", "ugc_routes", "match_api"},
+             "model_routes", "social_routes", "stats_routes", "ugc_routes",
+             "match_api", "migrate_legacy_matches"},
     "L3": {"auth", "social", "growth", "admin", "scores", "ugc", "ugc_assets"},
-    "L2": {"events", "sessions", "matches", "matchmaking", "models", "match_engine"},
+    "L2": {"events", "matches", "matchmaking", "models", "match_engine"},
     "L1": {"registry", "ugc_runner", "ugc_worker", "ugc_sandbox", "ugc_proxy",
            "ugc_pack", "package_pipeline", "inference"},
 }

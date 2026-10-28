@@ -55,6 +55,7 @@ RETAIN_S = 10 * 60        # terminal matches stay live for viewers and rematch
 REMATCH_TTL = 60.0
 EVENT_KEEP = 2000
 MARK_KEEP = 500           # timeline marks kept per match (design 17 §7.3)
+CHAT_KEEP = 200           # room chat kept per match for snapshot reconnects (design 17 §8)
 MAX_LIVE_PER_USER = 8
 BOT_TIMEOUT_S = 2.5
 
@@ -191,6 +192,10 @@ class Match:
         # events (eat / death / attack / clear) already ride on the frames.
         self.marks: list[dict] = []
         self._mark_seq = 0
+        # Room chat rides the same event stream (design 17 §5.2/§8): players
+        # only, kept for snapshot reconnects, never part of sealed frames.
+        self.chat: list[dict] = []
+        self._chat_seq = 0
 
     # ------------------------------------------------------------- reads
     @property
@@ -255,6 +260,8 @@ class Match:
                 "deadline_at": self.deadline_at, "rematch": self.rematch,
                 "frames": len(self.frames), "created_at": self.created_at,
                 "marks": list(self.marks),
+                # Chat is players-only: spectators never see the messages.
+                "chat": list(self.chat) if you else [],
                 "seq": self.log.seq, "server_time": _now_ms(),
             }
 
@@ -278,6 +285,40 @@ class Match:
                 self.frames[-1].setdefault("marks", []).append(mark)
             self.log.append("mark", **mark)
             return mark
+
+    # ------------------------------------------------------------- chat
+    def send_chat(self, principal: dict, text: str) -> dict:
+        """Append one room-chat message to the event stream (design 17 §8).
+
+        Only seated players may speak; everyone seated sees the message as a
+        ``chat`` SSE event and in the next snapshot. Spectators never receive
+        chat events or snapshot messages (the stream layer filters them).
+        The timeline also gets a ``chat`` mark whose payload carries no text. """
+        with self.lock:
+            if self.status in TERMINAL:
+                raise MatchError(409, "match_over", f"对局已{self.status}")
+            seat = self.seat_of(principal.get("id"))
+            if seat is None:
+                raise MatchError(403, "not_your_seat", "仅对局双方可以聊天")
+            text = (text or "").strip()
+            if not text:
+                raise MatchError(422, "bad_message", "消息不能为空")
+            self._chat_seq += 1
+            message = {
+                "id": self._chat_seq,
+                "from": principal.get("id"),
+                "name": _name(principal),
+                "seat": seat,
+                "text": text[:500],
+                "at": _now_ms(),
+                "tick": self.tick,
+            }
+            self.chat.append(message)
+            if len(self.chat) > CHAT_KEEP:
+                self.chat = self.chat[-CHAT_KEEP:]
+            self.log.append("chat", **message)
+            self.record_mark("chat", seat=seat)
+            return message
 
     # ------------------------------------------------------------- persistence
     def _players(self) -> list[dict]:
@@ -938,5 +979,5 @@ def record_view(rec: dict, user_id=None) -> dict:
             "result": rec["result"], "seats": seats, "you": {"seat": you},
             "tick": last["tick"], "frame": last["frame"], "events": last.get("events", []),
             "to_act": [], "deadline_at": None, "rematch": None, "frames": len(frames),
-            "marks": marks,
+            "marks": marks, "chat": [],
             "created_at": rec["created_at"], "seq": 0, "server_time": _now_ms()}

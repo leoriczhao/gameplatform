@@ -11,7 +11,7 @@
     POST /api/v2/matches/{id}/controller          {seat, controller}
     POST /api/v2/matches/{id}/resign
     POST /api/v2/matches/{id}/rematch
-    GET/POST /api/v2/matches/{id}/chat            room chat (players only; polled)
+    POST /api/v2/matches/{id}/chat                room chat (players only; read side is the stream's chat event)
     POST/DELETE /api/v2/{game}/matchmaking/queue, GET .../status
 
 Commands return an acknowledgement; every state change reaches clients as
@@ -30,7 +30,6 @@ from starlette.concurrency import run_in_threadpool
 import match_engine as engine
 import matches as store
 import matchmaking
-import social
 from api_limits import rate_limit
 from auth import principal_from_request
 
@@ -178,7 +177,12 @@ async def stream(uid: str, request: Request, since: int | None = Query(None, ge=
         return StreamingResponse(once(), media_type="text/event-stream",
                                  headers={"Cache-Control": "no-cache"})
 
-    def shaped(event: dict) -> str:
+    def shaped(event: dict) -> str | None:
+        if event["type"] == "chat":   # room chat is players-only (§7.3/§8)
+            with m.lock:
+                if m.seat_of(user_id) is None:
+                    return None
+            return _sse(event)
         if event["type"] == "tick":   # the viewer's share of the new frame
             with m.lock:
                 seat = m.seat_of(user_id)
@@ -200,7 +204,9 @@ async def stream(uid: str, request: Request, since: int | None = Query(None, ge=
             else:
                 for e in backlog:
                     pos = e["seq"]
-                    yield await run_in_threadpool(shaped, e)
+                    chunk = await run_in_threadpool(shaped, e)
+                    if chunk:
+                        yield chunk
             while engine.get_live(uid) is m:
                 if await request.is_disconnected():
                     break
@@ -218,7 +224,9 @@ async def stream(uid: str, request: Request, since: int | None = Query(None, ge=
                     continue
                 for e in items:
                     pos = e["seq"]
-                    yield await run_in_threadpool(shaped, e)
+                    chunk = await run_in_threadpool(shaped, e)
+                    if chunk:
+                        yield chunk
         finally:
             # Synchronous on purpose: after a client disconnect the stream is
             # cancelled, and anyio cancels every later await in this block too.
@@ -270,37 +278,10 @@ def rematch(uid: str, request: Request) -> dict:
 
 # ------------------------------------------------------------------ chat
 
-def _require_player(uid: str, principal: dict):
-    """Seat check for room chat; returns the live match, or None once sealed."""
-    m, rec = _readable(uid, principal)
-    seated = (m.seat_of(principal["id"]) if m else
-              any(p.get("user_id") == principal["id"] for p in rec["players"]))
-    if not seated:
-        raise HTTPException(403, {"code": "not_your_seat", "message": "仅对局双方可以聊天"})
-    return m
-
-
-@router.get("/api/v2/matches/{uid}/chat", summary="对局聊天（since 游标轮询）")
-def chat_get(uid: str, request: Request, since: int = Query(0, ge=0)) -> dict:
-    principal = _user(request)
-    _require_player(uid, principal)
-    msgs, next_since = social.chat_since(f"m:{uid}", since)
-    return {"messages": msgs, "next_since": next_since}
-
-
-@router.post("/api/v2/matches/{uid}/chat", summary="发送对局聊天")
+@router.post("/api/v2/matches/{uid}/chat", summary="发送对局聊天（读取走事件流 chat 事件）")
 def chat_post(uid: str, body: ChatIn, request: Request) -> dict:
     principal = _user(request)
-    m = _require_player(uid, principal)
-    try:
-        message = social.chat_send(f"m:{uid}", principal["id"], body.text)
-    except ValueError as e:
-        raise HTTPException(400, {"code": "bad_message", "message": str(e)})
-    if m is not None:
-        # Chat is polled over REST, so the timeline gets a mark instead of a
-        # chat payload: mark text never leaves the players' stream (§7.3).
-        m.record_mark("chat", seat=m.seat_of(principal["id"]))
-    return {"message": message}
+    return {"message": _call(_live(uid).send_chat, principal, body.text)}
 
 
 # ------------------------------------------------------------------ matchmaking

@@ -24,6 +24,7 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright, expect
 
 STREAM_RE = re.compile(r"/api/v2/matches/[^/]+/stream$")
+CHAT_RE = re.compile(r"/api/v2/matches/[^/]+/chat$")
 
 
 def run(base_url, output, cdp_url=None):
@@ -38,7 +39,7 @@ def run(base_url, output, cdp_url=None):
                       lambda route: route.abort())
         page = context.new_page()
         page.set_default_timeout(20000)
-        errors, native_requests, stream_requests = [], [], []
+        errors, native_requests, stream_requests, chat_polls = [], [], [], []
         page.on("pageerror", lambda error: errors.append(str(error)))
         # 认输等危险操作会 window.confirm，Playwright 默认自动取消，这里统一放行。
         page.on("dialog", lambda dialog: dialog.accept())
@@ -46,6 +47,9 @@ def run(base_url, output, cdp_url=None):
                 if "/api/" in request.url and "/env/" in request.url else None)
         page.on("request", lambda request: stream_requests.append(request.url)
                 if STREAM_RE.search(request.url) else None)
+        # Chat is streamed since M4; a GET /chat would mean the old polling back.
+        page.on("request", lambda request: chat_polls.append(request.url)
+                if request.method == "GET" and CHAT_RE.search(request.url) else None)
 
         def step(name):
             result["steps"].append(name)
@@ -284,7 +288,46 @@ def run(base_url, output, cdp_url=None):
             shot("pvp.png")
             step("pvp-lobby")
 
-            # 12. Stale-login regression: gp_user without gp_token must be cleared
+            # 12. Chat over the match stream: the browser is p0; a second API
+            # account joins p1 and speaks. The message must arrive as a SSE
+            # chat event, never through the removed REST polling endpoint.
+            r = page.request.post(
+                base_url + "/api/v1/auth/register",
+                headers={"Content-Type": "application/json"},
+                data=json.dumps({"username": "chat_" + uuid.uuid4().hex[:8],
+                                 "password": secrets.token_urlsafe(12)}),
+            )
+            assert r.status == 200, r.text()
+            guest = r.json()
+            guest_headers = {"Authorization": f"Bearer {guest['token']}",
+                             "Content-Type": "application/json"}
+            chat_room = api_post("/api/v2/matches", {
+                "game": "microrts", "mode": "casual", "visibility": "public",
+                "seats": [
+                    {"seat": "p0", "occupant": "me", "controller": {"type": "human"}},
+                    {"seat": "p1", "occupant": None, "controller": {"type": "human"}},
+                ],
+            })
+            chat_id = chat_room["id"]
+            joined = page.request.post(
+                base_url + f"/api/v2/matches/{chat_id}/seats/p1/join",
+                headers=guest_headers, data="{}")
+            assert joined.status == 200, joined.text()
+            page.goto(base_url + f"/m/{chat_id}")
+            expect(page.locator(".stage")).to_be_visible()
+            page.get_by_role("tab", name="聊天", exact=True).click()
+            sent = page.request.post(
+                base_url + f"/api/v2/matches/{chat_id}/chat",
+                headers=guest_headers,
+                data=json.dumps({"text": "你好，SSE 聊天"}))
+            assert sent.status == 200, sent.text()
+            expect(page.locator(".stage-chat__item")).to_contain_text("你好，SSE 聊天")
+            assert not chat_polls, chat_polls   # no removed GET /chat polling
+            shot("chat-sse.png")
+            api_post(f"/api/v2/matches/{chat_id}/resign", {}, status=200)
+            step("chat-sse")
+
+            # 13. Stale-login regression: gp_user without gp_token must be cleared
             page.evaluate(
                 "() => { localStorage.removeItem('gp_token');"
                 " localStorage.setItem('gp_user', JSON.stringify("
@@ -306,6 +349,7 @@ def run(base_url, output, cdp_url=None):
                 "page_errors": errors,
                 "native_environment_requests": native_requests,
                 "stream_requests": len(stream_requests),
+                "chat_poll_requests": len(chat_polls),
             })
             (output / "result.json").write_text(
                 json.dumps(result, ensure_ascii=False, indent=2) + "\n")

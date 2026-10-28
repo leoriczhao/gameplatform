@@ -28,29 +28,11 @@ client = TestClient(main.app)
 
 
 def _user_headers() -> dict:
-    username = f"score_{uuid.uuid4().hex[:10]}"
+    username = f"rl_{uuid.uuid4().hex[:10]}"
     r = client.post("/api/v1/auth/register",
                     json={"username": username, "password": "password123"})
     assert r.status_code == 200, r.text
     return {"Authorization": f"Bearer {r.json()['token']}"}
-
-
-def _play_snake_to_end(headers: dict, seed: int = 0) -> tuple[int, int]:
-    """Play a PvE snake session into the wall; return (match_id, score)."""
-    r = client.post("/api/v1/snake/play/sessions",
-                    json={"kind": "pve", "seed": seed}, headers=headers)
-    assert r.status_code == 200, r.text
-    sid = r.json()["session"]["id"]
-    for _ in range(30):
-        api_limits._hits.clear()  # play/actions 限流 30 req/s，测试内隔离
-        r = client.post(f"/api/v1/snake/play/sessions/{sid}/actions",
-                        json={"actions": 1}, headers=headers)
-        assert r.status_code == 200, r.text
-        body = r.json()
-        if body["done"]:
-            assert body["match_id"], body
-            return int(body["match_id"]), int(body["state"]["score"])
-    raise AssertionError("snake session did not finish")
 
 
 def test_games_catalog():
@@ -187,57 +169,6 @@ def test_tetris_ai_action():
     data = r.json()
     assert data["action"] in (0, 1, 2, 3)
     assert data["action_name"] in ("left", "right", "rotate", "hard_drop")
-
-
-def test_scores_claimed_from_pve_match():
-    """分数只能凭服务端对局领取；客户端自报的数字被忽略。"""
-    headers = _user_headers()
-    match_id, score = _play_snake_to_end(headers)
-    r = client.post("/api/snake/scores",
-                    json={"match_id": match_id, "score": 9999,
-                          "name": "测试玩家"}, headers=headers)
-    assert r.status_code == 200, r.text
-    body = r.json()
-    assert body["score"] == score and body["match_id"] == match_id
-    items = client.get("/api/snake/scores?limit=5").json()["items"]
-    assert any(it["score"] == score and it["name"] == "测试玩家"
-               for it in items)
-    # 同一场对局只能上榜一次
-    r = client.post("/api/snake/scores", json={"match_id": match_id},
-                    headers=headers)
-    assert r.status_code == 400, r.text
-
-
-def test_scores_reject_unknown_foreign_and_unauthenticated():
-    headers = _user_headers()
-    assert client.post("/api/snake/scores", json={"match_id": 999999},
-                       headers=headers).status_code == 404
-    other = _user_headers()
-    match_id, _ = _play_snake_to_end(other)
-    r = client.post("/api/snake/scores", json={"match_id": match_id},
-                    headers=headers)
-    assert r.status_code == 403, r.text  # 别人的对局
-    api_limits._hits.clear()
-    r = client.post("/api/snake/scores", json={"match_id": match_id})
-    assert r.status_code == 401, r.text  # 未登录
-
-
-def test_scores_rate_limit_per_user():
-    """docs/design/02: 登录用户 5 req/s（独立 bucket）。"""
-    h1 = _user_headers()
-    api_limits._hits.clear()
-    missing = 999_999_999
-    for _ in range(5):
-        r = client.post("/api/snake/scores", json={"match_id": missing},
-                        headers=h1)
-        assert r.status_code == 404, r.text  # 额度耗尽前先走校验
-    assert client.post("/api/snake/scores", json={"match_id": missing},
-                       headers=h1).status_code == 429
-    # 另一个账号有独立额度
-    h2 = _user_headers()
-    assert client.post("/api/snake/scores", json={"match_id": missing},
-                       headers=h2).status_code == 404
-    api_limits._hits.clear()
 
 
 def test_ai_action_rate_limit_tiers():

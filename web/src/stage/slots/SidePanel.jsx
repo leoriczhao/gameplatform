@@ -1,5 +1,5 @@
 /* SidePanel（docs/design/17 §7.3）：对局信息 / 聊天 / 日志。
-   聊天是 REST 轮询（设计 17 §12 M1 记录），只有座位上的人能看能发。 */
+   聊天来自对局流（快照 chat + chat 事件），只有座位上的人能看能发。 */
 
 import { useEffect, useRef, useState } from "react";
 import { Send } from "lucide-react";
@@ -11,6 +11,13 @@ const CLOCK_LABEL = {
   turn: "回合制",
   realtime: "实时",
 };
+
+/* 聊天时间：后端 at 是毫秒时间戳；兼容旧数据的秒级时间戳。 */
+function chatTime(at) {
+  const ts = Number(at);
+  if (!Number.isFinite(ts) || ts <= 0) return "";
+  return clock(ts > 1e12 ? ts / 1000 : ts);
+}
 
 function seatName(view, seat) {
   const hit = (view?.seats || []).find((item) => item.seat === seat);
@@ -40,11 +47,13 @@ function seatOfText(entry) {
   return entry?.seat ? entry.seat.toUpperCase() : "玩家";
 }
 
-export default function SidePanel({ view, caps, meta, chat, actions, frames, variant = "full" }) {
+export default function SidePanel({ view, caps, meta, actions, frames, variant = "full" }) {
   const [tab, setTab] = useState("match");
   const [draft, setDraft] = useState("");
   const logRef = useRef(null);
   const chatRef = useRef(null);
+  // M4：聊天随对局流到达（快照 chat + chat 事件），侧栏不再单独轮询。
+  const chat = Array.isArray(view?.chat) ? view.chat : [];
 
   useEffect(() => {
     if (tab === "log" && logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
@@ -120,12 +129,17 @@ export default function SidePanel({ view, caps, meta, chat, actions, frames, var
             {chat.length === 0 ? (
               <EmptyState title="还没有消息" desc="对局内的聊天只对双方可见。" />
             ) : chat.map((message) => {
-              const seat = (view?.seats || []).find((item) => item.occupant?.user_id === message.from)?.seat;
+              // from 是 user_id；兼容数字/字符串两种表示（现有座位映射不变），
+              // 座位已离开时回退到消息自带的 seat 字段。
+              const mapped = (view?.seats || []).find(
+                (item) => item.occupant && String(item.occupant.user_id) === String(message.from),
+              )?.seat;
+              const seat = mapped || message.seat || null;
               return (
                 <div key={message.id} className={`stage-chat__item stage-chat__item--${seatTone(seat)}`}>
-                  <span className="stage-chat__from">{seatName(view, seat) || "玩家"}</span>
+                  <span className="stage-chat__from">{seatName(view, seat) || message.name || "玩家"}</span>
                   <span className="stage-chat__text">{message.text}</span>
-                  <span className="stage-chat__at">{message.at ? clock(message.at) : ""}</span>
+                  <span className="stage-chat__at">{chatTime(message.at)}</span>
                 </div>
               );
             })}

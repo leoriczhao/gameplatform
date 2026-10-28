@@ -6,16 +6,18 @@
    reducer 只用它们做两件事：记录续传游标、估算客户端时钟偏差。
 
    事件类型（见 backend/match_engine.py）：
-     snapshot  MatchView + seq，每次连接的第一条，缺口过大时也会退化为它
+     snapshot  MatchView + seq，每次连接的第一条，缺口过大时也会退化为它；
+               其中的 chat 是聊天权威历史（只发给对局双方）
      tick      tick / frame / actions / events / to_act / deadline_at
      submitted seat / tick（不含动作内容，避免偷看）
      timeout   seat / tick / count / max
      seat      seat / occupant / controller / presence / submitted / timeouts
      status    status / result
-     mark      id / tick / kind / seat?（时间线事件刻度：timeout / chat / resign）
+     mark      id / tick / kind / seat?（时间线事件刻度：timeout / resign）
+     chat      id / from(user_id) / name? / seat? / text / at(ms) / tick（M4 起走 SSE）
      rematch   state / by / match_id? / expires_at?
      ping      server_time（没有 seq）
-   聊天是 REST 轮询（设计 17 §12 的 M1 实施记录），不经过 reducer。 */
+   M4 起聊天不再 REST 轮询：快照带 chat，增量走 chat 事件。 */
 
 export const LIVE_STATUS = ["waiting", "active"];
 export const TERMINAL_STATUS = ["finished", "aborted", "cancelled"];
@@ -62,6 +64,39 @@ export function seatTone(seat) {
   return "neutral";
 }
 
+const MAX_CHAT = 200;
+
+/* 聊天消息契约：{id, from(user_id), name?, seat?, text, at(ms), tick}。
+   后端把消息字段平铺在 SSE 的 chat 事件上；这里同时兼容 event.message 包装，
+   以及旧 REST 形状（user_id / nickname / created_at），方便 POST 返回的消息
+   直接走同一条 reducer 路径做乐观追加。 */
+function normalizeMessage(raw) {
+  if (!raw || raw.id == null) return null;
+  return {
+    id: raw.id,
+    from: raw.from ?? raw.user_id ?? null,
+    name: raw.name ?? raw.nickname ?? null,
+    seat: raw.seat ?? null,
+    text: raw.text ?? "",
+    at: raw.at ?? raw.created_at ?? null,
+    tick: Number.isFinite(raw.tick) ? raw.tick : null,
+  };
+}
+
+/* 快照里的 chat 是权威历史：过滤坏消息、按 id 去重，只保留最近 MAX_CHAT 条。 */
+function normalizeChat(raw) {
+  if (!Array.isArray(raw)) return null;
+  const seen = new Set();
+  const messages = [];
+  for (const item of raw) {
+    const message = normalizeMessage(item);
+    if (!message || seen.has(message.id)) continue;
+    seen.add(message.id);
+    messages.push(message);
+  }
+  return messages.length > MAX_CHAT ? messages.slice(messages.length - MAX_CHAT) : messages;
+}
+
 export function emptyView() {
   return {
     id: "", game: "", version: null, kind: null, mode: null, visibility: null,
@@ -73,7 +108,7 @@ export function emptyView() {
   };
 }
 
-/* snapshot 是权威状态：整份替换，只保留客户端自己维护的聊天。 */
+/* snapshot 是权威状态：整份替换；chat 优先用服务端快照（缺失时保留旧值）。 */
 export function applySnapshot(view, event, now = Date.now()) {
   const hasFrames = Number.isFinite(event?.frames);
   const tick = Number.isFinite(event?.tick) ? event.tick : 0;
@@ -99,7 +134,7 @@ export function applySnapshot(view, event, now = Date.now()) {
     frame_count: hasFrames ? event.frames : tick + 1,
     rematch: event?.rematch ?? null,
     created_at: event?.created_at ?? null,
-    chat: view?.chat ?? [],
+    chat: normalizeChat(event?.chat) ?? view?.chat ?? [],
     log: view?.log ?? [],
     marks: Array.isArray(event?.marks) ? event.marks : [],
     seq: Number.isFinite(event?.seq) ? event.seq : (view?.seq ?? 0),
@@ -208,10 +243,16 @@ export function reduceMatch(view, event, now = Date.now()) {
       return { ...base, rematch: event.rematch ?? null,
         log: appendLog(view, { kind: "rematch", rematch: event.rematch ?? null }) };
     case "chat": {
-      const message = event.message;
-      if (!message || !message.id) return base;
-      const known = view.chat.some((m) => m.id === message.id);
-      return { ...base, chat: known ? view.chat : [...view.chat, message] };
+      // 后端把消息字段平铺在事件上：{type:"chat", id, from, name, seat,
+      // text, at(ms), tick}；同时兼容 {type:"chat", message:{...}} 包装。
+      const message = normalizeMessage(event.message ?? event);
+      if (!message) return base;
+      if ((view.chat || []).some((item) => item.id === message.id)) return base;
+      const chat = [...(view.chat || []), message];
+      return {
+        ...base,
+        chat: chat.length > MAX_CHAT ? chat.slice(chat.length - MAX_CHAT) : chat,
+      };
     }
     case "ping":
       // ping 没有 seq；只用来校准时钟。

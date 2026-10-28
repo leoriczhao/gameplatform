@@ -3,8 +3,8 @@
 一个「游戏 + 训练 + 模型对战」三位一体的多游戏 RL 对战平台。目标域名 `games.cree1p.com`。
 
 - **统一环境入口**：仅公开官方 OpenEnv 0.4.1（`/api/openenv/{game}`），WS 一连接一实例，使用 `GenericEnvClient.reset/step/state`；训练在客户端，环境计算在后端。新契约见 [OpenEnv 环境交互](docs/api/openenv.md)，旧环境 API 已删除，不保留兼容
-- **对战闭环**：房间（公开/私有 · ranked/casual）、快速匹配（ELO band 撮合）、断线重连、再来一局、观战 + 回放 + 分享链接
-- **平台能力（v1.0）**：账号/游客、资料/好友/房间聊天/通知（轮询落库）、XP/等级/战绩墙/总榜周榜、公告/举报/管理后台、SQLite 备份脚本
+- **对战闭环（v2，设计 17）**：统一 Match / 座位 / turn 时钟、REST 命令 + SSE 事件流、服务端封存帧、断线重连、再来一局、观战 + 回放 + 分享链接 `/m/:id`；v1 play / rooms / matchmaking 已删除，旧 SDK 收到 404
+- **平台能力（v1.0）**：账号/游客、资料/好友/对局聊天（并入 SSE）/通知（轮询落库）、XP/等级/战绩墙/总榜周榜、公告/举报/管理后台、SQLite 备份脚本
 - **模型生态**：ONNX 托管（契约校验）、评估、模型 vs 模型 / vs 内置 AI
 - **渲染 v2（2026-09）**：声明式棋盘（精灵/矢量/朝向/归属色/血条/图层/动效/HUD）→ 资源包（PNG/WebP + 音效）
   → 沙箱自定义渲染器（opaque-origin Worker + OffscreenCanvas，默认关闭）；设计见 `docs/design/16`
@@ -21,7 +21,7 @@
 | `tetris` | 俄罗斯方块 10×20（新） | 0=左移 1=右移 2=旋转 3=硬降，7-bag | 启发式基线（Dellacherie 一子搜索） |
 | `microrts` | 微RTS 16×16（MicroRTS 规则移植） | **多单位复合动作** `[[unit_id, cmd, dir?, type?], …]`；单代理 vs 内置策略 / 双代理 external | WorkerRush / LightRush / RangedRush 确定性脚本 bot |
 
-> PvP（房间/匹配/观战回放）按游戏包 `pvp.enabled` 能力声明开放（microrts、石头剪刀布等）；接入见 `docs/design/09-游戏接入指南.md`（v2 游戏包）。
+> PvP / 模型对战按游戏包 `pvp.enabled` 能力声明开放（microrts 等）；房间、快速匹配、观战回放统一走 `/m/:id` 舞台；接入见 `docs/design/09-游戏接入指南.md`（v2 游戏包）。
 
 ## 目录
 
@@ -35,11 +35,12 @@ backend/            FastAPI 平台服务
   openenv_native.py 唯一环境入口：官方 OpenEnv PlatformEnvironment + create_fastapi_app（/api/openenv/{game}/*）
   scores.py         通用排行榜（SQLite，game_id 列）
   auth.py / auth_routes.py           账号、JWT、游客
-  sessions.py / play_routes.py       服务器权威会话（PvE/PvP）+ 房间 + 重连/rematch
-  matchmaking.py / matchmaking_routes.py   快速匹配（内存队列 + ELO band）
-  matches.py / matches_routes.py     PvP 落库 + ELO + 模型对战 worker + 回放端点
+  match_engine.py / match_api.py     v2 Match actor（座位/时钟/截止时间/结算）+ REST/SSE 边缘层
+  matches.py / matches_routes.py     v2 对局记录 + 封存帧 + ELO + 历史列表/战力查询
+  matchmaking.py                     v2 快速匹配（内存队列 + ELO band，直接配对成 Match）
+  migrate_legacy_matches.py          一次性离线迁移：v1 记录补 uid、按 version 重算封存帧
   models.py / model_routes.py / inference.py   ONNX 托管与推理
-  social.py / social_routes.py       资料/好友/房间聊天/通知
+  social.py / social_routes.py       资料/好友/通知（房间聊天已并入对局 SSE）
   growth.py / stats_routes.py        XP/等级/战绩/总榜周榜/ELO 走势
   admin.py / admin_routes.py         公告/举报/管理后台（首 admin 环境变量 bootstrap）
   ugc*.py / registry.py            游戏库：包校验/静态扫描/沙箱 runner/代理注册（13 G3 起平台零游戏代码）
@@ -54,7 +55,7 @@ sdk/                Python SDK（训练 + 全量 API 客户端）
   gameplatform/remote.py   RemoteVecEnv(game, n, obs_mode)：每槽独立 OpenEnv 连接
   gameplatform/gym.py      gymnasium 封装，注册 platform-{game}-v0
   gameplatform/export.py   export_onnx（导出即过契约）
-  gameplatform/client.py   PlatformClient / SessionClient（v1 API 全量封装）
+  gameplatform/client.py   PlatformClient / SessionClient（v2 matches / SSE 事件流客户端，SDK 1.0）
   gameplatform/games/      客户端观测特征（snake features/rotwin/reach）
 training/           训练脚本：snake_dqn.py / tetris_dqn.py（DQN 主循环，内置 DQN 权重的来源）
 tests/              pytest（官方 OpenEnv、SDK 训练、回放升级、空库启动等）
@@ -65,7 +66,9 @@ docs/design/        历史设计/决策与当前 GDK 指南（00-README 是索�
 
 > 部署：Docker 多阶段构建（node:22 跑 `npm run build` → 产物 COPY 进 python 镜像，FastAPI 直接服务 dist）。
 > 本地联调前端：`cd web && npm run dev`（vite 把 `/api` 代理到 127.0.0.1:8080）。
-> 数据：SQLite（`SCORES_DB`，生产在卷 `/data`）+ 内存态会话/房间/匹配队列（重启即失效，D12）。
+> 数据：SQLite（`SCORES_DB`，生产在卷 `/data`）+ 内存态对局/匹配队列（重启即失效，D12）。
+> 从 v1 play 升级（设计 17 M4）：先备份数据库，部署后停写跑一次
+> `SCORES_DB=/data/scores.db .venv/bin/python backend/migrate_legacy_matches.py --dry-run`，确认后去掉 `--dry-run` 正式迁移；脚本幂等，可 `--limit` 分批。SDK 需 ≥ 1.0（旧客户端调用 v1 play API 会 404）。
 
 ## 本地开发与验收
 
@@ -187,7 +190,11 @@ from stable_baselines3 import PPO
 with gym.make("platform-tetris-v0", obs_mode="grid") as env:
     model = PPO("MlpPolicy", env).learn(100_000)
 
-from gameplatform import PlatformClient                     # v1 API 全量封装
+# 对局客户端（SDK 1.0 / v2 matches；旧 v1 play API 已在 M4 删除）
+from gameplatform import PlatformClient
 c = PlatformClient(base_url="https://games.cree1p.com"); c.login("alice", "secret")
-s = c.create_room("microrts", mode="casual", visibility="public")   # 建房/快速匹配/聊天/统计…
+m = c.session("snake")
+view = m.start_pve()                      # practice + unlisted 练习局
+view = m.act([1])                         # 提交后轮询到下一次轮到我 / 终局
+print(view["tick"], view["status"], m.replay()[:1])
 ```
