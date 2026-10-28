@@ -48,7 +48,8 @@ def test_openapi_exposes_named_runtime_contracts_and_status_enums():
     assert schemas["SessionStatus"]["enum"] == [
         "waiting", "active", "finished", "abandoned", "cancelled"]
     assert schemas["MatchStatus"]["enum"] == [
-        "queued", "running", "finished", "failed"]
+        "queued", "running", "finished", "failed",
+        "waiting", "active", "aborted", "cancelled"]   # v2 对局状态（设计 17）
     assert schemas["MatchKind"]["enum"] == [
         "pve", "pvp", "model_vs_model"]
 

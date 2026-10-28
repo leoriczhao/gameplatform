@@ -1,13 +1,27 @@
 async function fail(resp) {
-  let detail = `HTTP ${resp.status}`;
+  let message = `HTTP ${resp.status}`;
+  let code;
+  let detail;
   try {
     const data = await resp.json();
-    detail = data.detail || detail;
+    detail = data?.detail;
+    if (typeof detail === "string") {
+      message = detail;
+    } else if (detail && typeof detail === "object") {
+      // v2 API（docs/design/17 §5.1）的错误是 {code, message}，UI 需要 code 分支
+      message = detail.message || message;
+      code = detail.code;
+    } else if (data?.code) {
+      message = data.message || message;
+      code = data.code;
+    }
   } catch (e) {
     /* keep */
   }
-  const err = new Error(detail);
+  const err = new Error(message);
   err.status = resp.status;
+  if (code) err.code = code;
+  if (detail !== undefined) err.detail = detail;
   throw err;
 }
 

@@ -262,6 +262,10 @@ def test_private_room_invites_and_visibility():
     assert client.post(f"/api/v2/matches/{mid}/chat", json={"text": "gg"}, headers=a["h"]).status_code == 200
     msgs = client.get(f"/api/v2/matches/{mid}/chat", headers=b["h"]).json()["messages"]
     assert [m["text"] for m in msgs] == ["gg"]
+    # The chat itself stays players-only; the timeline only gets a mark.
+    assert [(m["kind"], m["seat"]) for m in _view(a, mid)["marks"]] == [("chat", "p0")]
+    frames = client.get(f"/api/v2/matches/{mid}/frames", headers=b["h"]).json()["frames"]
+    assert [(m["kind"], m["seat"]) for m in frames[0]["marks"]] == [("chat", "p0")]
 
 
 def test_deadline_auto_waits_then_forfeits(monkeypatch):
@@ -273,10 +277,18 @@ def test_deadline_auto_waits_then_forfeits(monkeypatch):
     assert _act(a, mid, 0, []).status_code == 202
     assert _wait(lambda: _view(a, mid)["tick"] == 1)   # b timed out once: auto-wait
     assert _view(a, mid)["seats"][1]["timeouts"] == 1
+    marks = _view(a, mid)["marks"]
+    assert [(m["tick"], m["kind"], m["seat"]) for m in marks] == [(0, "timeout", "p1")]
+    frames = client.get(f"/api/v2/matches/{mid}/frames", headers=a["h"]).json()["frames"]
+    assert [m["kind"] for m in frames[0]["marks"]] == ["timeout"]
     assert _act(a, mid, 1, []).status_code == 202
     assert _wait(lambda: _view(a, mid)["status"] == "finished")
-    assert _view(a, mid)["result"] == {"winner": "p0", "cause": "timeout",
-                                       "tick": _view(a, mid)["tick"]}
+    view = _view(a, mid)
+    assert view["result"] == {"winner": "p0", "cause": "timeout", "tick": view["tick"]}
+    assert [m["kind"] for m in view["marks"]] == ["timeout", "timeout"]
+    # Sealed frames keep the marks too, so replay from a record shows them.
+    replay = engine.record_view(store.get_v2(mid), a["user"]["id"])
+    assert [m["kind"] for m in replay["marks"]] == ["timeout", "timeout"]
 
 
 def test_matchmaking_v2_pairs_into_a_match():
@@ -434,3 +446,20 @@ def test_contract_clock_to_act_and_views(duel_game):
     sealed = client.get(f"/api/v2/matches/{mid}/frames", headers=c["h"]).json()["frames"]
     assert sealed[0]["frame"]["hands"] == {"p0": [1, 2], "p1": [3, 4]}   # revealed after the end
     assert "_deck" in sealed[0]["frame"]
+
+
+def test_history_rows_expose_uid_for_stage_links():
+    """M3：/api/v1/matches 的历史行要带 uid，前端才能链到 /m/:id；
+    v2 的 winner 是座位 id 字符串，响应模型也必须接受。"""
+    u = _user()
+    m = _create(u, game="microrts", seats=[
+        {"seat": "p0", "occupant": "me", "controller": {"type": "human"}},
+        {"seat": "p1", "occupant": None, "controller": {"type": "ai", "strategy": "worker_rush"}}])
+    assert client.post(f"/api/v2/matches/{m['id']}/resign", headers=u["h"]).status_code == 200
+    r = client.get("/api/v1/matches", headers=u["h"])
+    assert r.status_code == 200, r.text
+    row = next(item for item in r.json()["matches"] if item.get("uid") == m["id"])
+    assert row["uid"] == m["id"]
+    assert row["kind"] == "pve" and row["mode"] == "practice"
+    assert row["visibility"] == "unlisted" and row["version"]
+    assert isinstance(row["result"]["winner"], str)               # v2: "p0"/"p1"

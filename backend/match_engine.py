@@ -54,6 +54,7 @@ IDLE_TTL = 30 * 60        # untimed matches nobody moves in are aborted
 RETAIN_S = 10 * 60        # terminal matches stay live for viewers and rematch
 REMATCH_TTL = 60.0
 EVENT_KEEP = 2000
+MARK_KEEP = 500           # timeline marks kept per match (design 17 §7.3)
 MAX_LIVE_PER_USER = 8
 BOT_TIMEOUT_S = 2.5
 
@@ -186,6 +187,10 @@ class Match:
         self.viewers = 0
         self.lock = threading.RLock()
         self.log = EventLog()
+        # Timeline marks (timeout / chat / resign …) indexed by tick. Engine
+        # events (eat / death / attack / clear) already ride on the frames.
+        self.marks: list[dict] = []
+        self._mark_seq = 0
 
     # ------------------------------------------------------------- reads
     @property
@@ -249,8 +254,30 @@ class Match:
                 "events": self.state.get("events", []), "to_act": list(self.to_act),
                 "deadline_at": self.deadline_at, "rematch": self.rematch,
                 "frames": len(self.frames), "created_at": self.created_at,
+                "marks": list(self.marks),
                 "seq": self.log.seq, "server_time": _now_ms(),
             }
+
+    # ------------------------------------------------------------- timeline marks
+    def record_mark(self, kind: str, **data) -> dict | None:
+        """Index one timeline mark at the current tick (design 17 §7.3).
+
+        Stored three ways: appended to the current frame (sealed replays keep
+        it), to the per-match marks list (snapshots/reconnects), and to the
+        event log as a ``mark`` SSE event (live viewers). Nothing is recorded
+        once the match is terminal."""
+        with self.lock:
+            if self.status in TERMINAL:
+                return None
+            self._mark_seq += 1
+            mark = {"id": self._mark_seq, "tick": self.tick, "kind": kind, **data}
+            self.marks.append(mark)
+            if len(self.marks) > MARK_KEEP:
+                self.marks = self.marks[-MARK_KEEP:]
+            if self.frames and self.frames[-1]["tick"] == self.tick:
+                self.frames[-1].setdefault("marks", []).append(mark)
+            self.log.append("mark", **mark)
+            return mark
 
     # ------------------------------------------------------------- persistence
     def _players(self) -> list[dict]:
@@ -494,6 +521,7 @@ class Match:
                 self._cancel("host_cancelled")
                 return
             others = [s for s in self.seats if s != seat]
+            self.record_mark("resign", seat=seat)
             self._finish(others[0] if others else None, "resigned")
 
     def set_controller(self, principal: dict, seat: str, controller: dict) -> None:
@@ -573,6 +601,7 @@ class Match:
             s.timeouts += 1
             limit = self.clock.get("max_timeouts") or PVP_MAX_TIMEOUTS
             self.log.append("timeout", seat=seat, tick=self.tick, count=s.timeouts, max=limit)
+            self.record_mark("timeout", seat=seat, count=s.timeouts, max=limit)
             if (self.empty_action is None or self.clock.get("on_timeout") == "forfeit"
                     or s.timeouts >= limit):
                 others = [x for x in self.seats if x != seat]
@@ -902,10 +931,12 @@ def record_view(rec: dict, user_id=None) -> dict:
                 and s["occupant"]["user_id"] == user_id), None)
     frames = store.read_frames(rec["frames"]) if rec.get("frames") else []
     last = frames[-1] if frames else {"tick": 0, "frame": None, "events": []}
+    marks = [m for f in frames for m in (f.get("marks") or [])]
     return {"id": rec["uid"], "game": rec["game"], "version": rec["version"],
             "kind": rec["kind"], "mode": rec["mode"], "visibility": rec["visibility"],
             "invite": None, "clock": rec["clock"], "status": rec["status"],
             "result": rec["result"], "seats": seats, "you": {"seat": you},
             "tick": last["tick"], "frame": last["frame"], "events": last.get("events", []),
             "to_act": [], "deadline_at": None, "rematch": None, "frames": len(frames),
+            "marks": marks,
             "created_at": rec["created_at"], "seq": 0, "server_time": _now_ms()}

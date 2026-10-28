@@ -93,14 +93,24 @@ def _ensure_v2_schema(conn) -> None:
     _V2_READY.add(str(SCORES_DB))
 
 
-def _row(row) -> dict:
-    return {"id": row[0], "game": row[1], "kind": row[2],
-            "players": json.loads(row[3] or "[]"),
-            "models": json.loads(row[4] or "[]"),
-            "status": row[5],
-            "result": json.loads(row[6]) if row[6] else None,
-            "replay": json.loads(row[7]) if row[7] else None,
-            "created_at": row[8], "finished_at": row[9]}
+def _row(row, columns=None) -> dict:
+    # v2 的 uid / mode / visibility / version 是 ALTER TABLE 追加的列，历史库的
+    # 物理顺序可能不同，所以按 cursor.description 里的列名取值；前端
+    # /matches → /m/:id 需要 uid（设计 17 M3）。
+    out = {"id": row[0], "game": row[1], "kind": row[2],
+           "players": json.loads(row[3] or "[]"),
+           "models": json.loads(row[4] or "[]"),
+           "status": row[5],
+           "result": json.loads(row[6]) if row[6] else None,
+           "replay": json.loads(row[7]) if row[7] else None,
+           "created_at": row[8], "finished_at": row[9]}
+    if columns:
+        by_name = dict(zip(columns, row))
+        out["uid"] = by_name.get("uid")
+        out["mode"] = by_name.get("mode")
+        out["visibility"] = by_name.get("visibility")
+        out["version"] = by_name.get("version")
+    return out
 
 
 # ----------------------------------------------------------------- ratings
@@ -356,10 +366,12 @@ def record_pve_finish(sess) -> int | None:
 def get_match(match_id: int) -> dict | None:
     conn = _db()
     try:
-        row = conn.execute("SELECT * FROM matches WHERE id=?", (match_id,)).fetchone()
+        cur = conn.execute("SELECT * FROM matches WHERE id=?", (match_id,))
+        row = cur.fetchone()
+        columns = [d[0] for d in cur.description] if cur.description else None
     finally:
         conn.close()
-    return _row(row) if row else None
+    return _row(row, columns) if row else None
 
 
 def get_match_replay(match_id: int) -> dict | None:
@@ -414,14 +426,16 @@ def list_matches(user_id: int) -> list[dict]:
     """Matches where the user played or owns a participating model."""
     conn = _db()
     try:
-        rows = conn.execute(
+        cur = conn.execute(
             "SELECT * FROM matches WHERE status != 'queued' ORDER BY id DESC "
-            "LIMIT 200").fetchall()
+            "LIMIT 200")
+        rows = cur.fetchall()
+        columns = [d[0] for d in cur.description] if cur.description else None
     finally:
         conn.close()
     out = []
     for r in rows:
-        m = _row(r)
+        m = _row(r, columns)
         mine = any(p.get("user_id") == user_id for p in m["players"]) \
             or user_id in [mod.get("owner_id") for mod in (m.get("model_meta") or [])]
         if mine:

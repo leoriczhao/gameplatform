@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import "./play.css";
 import { toast } from "sonner";
 import {
@@ -7,20 +7,15 @@ import {
   Bot,
   Box,
   Gamepad2,
-  Gauge,
   Play as PlayIcon,
-  RotateCcw,
   Swords,
   Trophy,
-  Upload,
+  Users,
 } from "lucide-react";
-import BoardFrame from "../BoardFrame.jsx";
-import { getJson, post } from "../api.js";
-import { createOpenEnvClient } from "../../openenv.js";
 import { useAuth } from "../../AuthContext.jsx";
 import { useLabAuth } from "../AuthDialog.jsx";
-import UgBoard from "../../components/UgBoard.jsx";
-import { relativeAction } from "../../games.js";
+import { post, useGames, useLeaderboard, useModels } from "../api.js";
+import MiniBoard from "../MiniBoard.jsx";
 import {
   Button,
   Chip,
@@ -29,8 +24,8 @@ import {
   Field,
   LinkButton,
   Loading,
-  Modal,
   Pill,
+  Tabs,
 } from "../ui.jsx";
 
 const KEY_GLYPH = {
@@ -39,9 +34,30 @@ const KEY_GLYPH = {
   ArrowUp: "↑",
   ArrowDown: "↓",
   Space: "SPACE",
+  " ": "SPACE",
 };
 
-function controlHint(controls) {
+// v2 命令的错误带机器可读的 code（docs/design/17 §5.1）。这里把可预期的
+// 创建失败翻译成人话；未知错误再退回 error.message。
+const CODE_TEXT = {
+  bad_controller: "对手配置无效，请重新选择",
+  bad_seats: "座位配置无效，请重新选择对手",
+  bad_mode: "该模式不可用（单机练习只能用 practice）",
+  bad_visibility: "可见性不可用",
+  bad_settings: "对局设置无效，请检查 seed",
+  unknown_game: "游戏不存在或未公开",
+  no_pvp: "该游戏不支持人类对战",
+  too_many_matches: "同时进行的对局过多，请先结束其他对局",
+  login_required: "请先登录",
+};
+
+function errorText(error, fallback = "开始对局失败") {
+  if (!error) return fallback;
+  return (error.code && CODE_TEXT[error.code]) || error.message || fallback;
+}
+
+// 把 game.yaml 的 controls.keys 压成一行提示（和旧试玩页一致的取法）
+function controlHints(controls) {
   const keys = controls && controls.keys;
   if (!keys || typeof keys !== "object") return [];
   return Object.entries(keys)
@@ -54,309 +70,217 @@ function controlHint(controls) {
 
 export default function Play() {
   const { slug } = useParams();
+  const location = useLocation();
+  const navigate = useNavigate();
   const { user, token, authReady } = useAuth();
   const { openAuth } = useLabAuth();
 
-  const [meta, setMeta] = useState(null);
-  const [info, setInfo] = useState(null);
-  const [pvpEnabled, setPvpEnabled] = useState(false);
-  const [state, setState] = useState(null);
-  const [preview, setPreview] = useState(null);
-  const [sessionId, setSessionId] = useState(null);
-  const [over, setOver] = useState(null);
-  const [matchId, setMatchId] = useState(null);
-  const [aiMode, setAiMode] = useState(false);
-  const [leaderboard, setLeaderboard] = useState([]);
-  const [actionInput, setActionInput] = useState("");
-  const [rankMsg, setRankMsg] = useState(null);
-  const [loadErr, setLoadErr] = useState(null);
-  const [submitName, setSubmitName] = useState(() => {
-    try {
-      return localStorage.getItem("ugc-name") || "";
-    } catch (e) {
-      return "";
-    }
-  });
+  const gamesQuery = useGames();
+  const loggedIn = Boolean(user) && user.role !== "guest";
+  const modelsQuery = useModels(token, Boolean(authReady && loggedIn));
+  const leaderboardQuery = useLeaderboard(slug, token, true);
 
-  const sessRef = useRef(null);
-  const stateRef = useRef(null);
-  const pendingRef = useRef(false);
+  const [choice, setChoice] = useState("solo"); // 单座默认自己玩；双座会回退到 options[0]
+  const [strategy, setStrategy] = useState("");
+  const [modelId, setModelId] = useState("");
+  const [seed, setSeed] = useState("");
+  const [creating, setCreating] = useState(false);
 
-  const choices = (info && info.choices && info.choices.length && info.choices)
-    || (meta && meta.pvp && meta.pvp.choices && meta.pvp.choices.length && meta.pvp.choices)
-    || null;
-  const hasAI = Boolean(meta && meta.ai_strategies && meta.ai_strategies.length);
-  const hasModelChallenge = Boolean(meta && meta.contract);
-  const controls = meta && meta.controls;
-
+  // 组件卸载后不再 setState / toast（导航发生在请求返回之后）
+  const mountedRef = useRef(true);
   useEffect(() => {
-    const controller = new AbortController();
-    const env = createOpenEnvClient(slug, { signal: controller.signal });
-    setMeta(null);
-    setInfo(null);
-    setPreview(null);
-    setLoadErr(null);
-    (async () => {
-      try {
-        const catalog = await getJson("/api/games", null, controller.signal);
-        if (controller.signal.aborted) return;
-        const game = (catalog.games || []).find((item) => item.id === slug);
-        if (!game) throw new Error("游戏不存在或未公开");
-        const snapshot = await env.state();
-        if (controller.signal.aborted) return;
-        const catalogMeta = game.meta || {};
-        const environment = snapshot && snapshot.environment;
-        setMeta((environment && environment.meta) || catalogMeta);
-        setPvpEnabled(Boolean(game.pvp_enabled));
-        setInfo(environment || {
-          game: slug,
-          version: catalogMeta.version,
-          action_space: game.action_space || catalogMeta.action_space,
-          choices: game.choices || catalogMeta.choices || (catalogMeta.pvp && catalogMeta.pvp.choices),
-          meta: catalogMeta,
-        });
-      } catch (e) {
-        if (!controller.signal.aborted) setLoadErr(e.message || "加载失败");
-      } finally {
-        env.close();
-      }
-    })();
-    getJson("/api/" + slug + "/scores?limit=10", null, controller.signal)
-      .then((data) => {
-        if (!controller.signal.aborted) setLeaderboard(data.items || []);
-      })
-      .catch(() => {});
+    mountedRef.current = true;
     return () => {
-      controller.abort();
-      env.close();
+      mountedRef.current = false;
     };
-  }, [slug]);
+  }, []);
 
-  const loadLeaderboard = useCallback(async () => {
-    try {
-      const data = await getJson("/api/" + slug + "/scores?limit=10");
-      setLeaderboard(data.items || []);
-    } catch (e) {
-      /* keep */
+  const isUgc = location.pathname.startsWith("/games/ugc/");
+  const pvpPath = isUgc ? `/games/ugc/${slug}/pvp` : `/games/${slug}/pvp`;
+
+  const catalog = (gamesQuery.data && gamesQuery.data.games) || [];
+  const game = catalog.find((item) => item.id === slug) || null;
+  const meta = (game && game.meta) || {};
+  const board = meta.board || null;
+  const hud = Array.isArray(board && board.hud) ? board.hud : [];
+  const contract = meta.contract || null;
+  const controls = meta.controls || null;
+  const pvpEnabled = Boolean(game && game.pvp_enabled);
+
+  // 对手策略来自 game.yaml 的 opponents / ai_strategies —— match_engine._checked_controller
+  // 也是把两处合并后校验，这里保持一致，避免前端给出服务端不认的 strategy。
+  const strategies = useMemo(() => {
+    const raw = [...(meta.opponents || []), ...(meta.ai_strategies || [])];
+    return [...new Set(raw.map(String).filter(Boolean))];
+  }, [meta]);
+
+  const models = useMemo(() => {
+    const rows = (modelsQuery.data && modelsQuery.data.models) || [];
+    // GET /api/v1/models 只返回自己的模型；再显式过滤游戏 / active / 归属，
+    // 防止旧数据或别的游戏模型混进 controller。
+    return rows.filter(
+      (model) =>
+        model.game === slug &&
+        model.status === "active" &&
+        model.owner_id != null &&
+        (!user || model.owner_id === user.id),
+    );
+  }, [modelsQuery.data, slug, user]);
+
+  // 座位数必须和服务端 seat_count() 一致：game.yaml 的 seats 优先，否则只有
+  // 声明了 PvP / 内置对手的游戏才是 2 座；ai_strategies 不代表第二个座位
+  // （snake / tetris 是单座游戏，策略用于服务端托管演示）。
+  const seatCount = useMemo(() => {
+    const declared = Number(meta.seats) || 0;
+    if (declared) return declared;
+    const hasPvp = pvpEnabled || Boolean(meta.pvp && meta.pvp.enabled)
+      || (Array.isArray(meta.opponents) && meta.opponents.length > 0);
+    return hasPvp ? 2 : 1;
+  }, [meta.seats, meta.pvp, meta.opponents, pvpEnabled]);
+
+  // 单座：自己玩 / AI 演示（服务端托管我的座位）/ 我的模型代打；
+  // 双座：人类 vs AI / 人类 vs 我的模型（对面）/ 模型代打我的座位（对手用 AI）。
+  const options = [];
+  if (seatCount >= 2) {
+    if (strategies.length > 0) options.push({ key: "ai", label: "人类 vs AI" });
+    if (models.length > 0) options.push({ key: "model", label: "人类 vs 我的模型" });
+    if (models.length > 0 && strategies.length > 0) {
+      options.push({ key: "model-self", label: "模型代打我" });
     }
-  }, [slug]);
+  } else {
+    options.push({ key: "solo", label: "自己玩" });
+    if (strategies.length > 0) options.push({ key: "ai", label: "AI 演示" });
+    if (models.length > 0) options.push({ key: "model", label: "模型代打" });
+  }
+  const activeChoice = options.some((item) => item.key === choice)
+    ? choice
+    : options[0]
+      ? options[0].key
+      : null;
+  const activeStrategy = strategies.includes(strategy) ? strategy : strategies[0] || null;
+  const activeModel =
+    models.find((model) => String(model.id) === String(modelId)) || models[0] || null;
 
-  const newGame = useCallback(async () => {
-    if (!user) {
+  const create = async () => {
+    if (!loggedIn) {
       openAuth("login");
       return;
     }
-    const old = sessRef.current;
-    if (old) {
-      post("/api/v1/" + slug + "/play/sessions/" + old + "/leave", {}, token).catch(() => {});
+    let seedNumber;
+    const seedText = seed.trim();
+    if (seedText) {
+      if (!/^\d+$/.test(seedText) || !Number.isSafeInteger(Number(seedText))) {
+        toast.warning("seed 需为非负整数（留空表示随机）");
+        return;
+      }
+      seedNumber = Number(seedText);
     }
+    if (options.length === 0) {
+      toast.info("该游戏没有可配置的单机对手，请去对战大厅约战");
+      return;
+    }
+    const needsModel = activeChoice === "model" || activeChoice === "model-self";
+    const needsStrategy = activeChoice === "ai" || activeChoice === "model-self";
+    if (needsModel && !activeModel) {
+      toast.warning("先选择一个模型");
+      return;
+    }
+    if (needsStrategy && !activeStrategy) {
+      toast.warning("先选择一个 AI 策略");
+      return;
+    }
+    const human = { type: "human" };
+    const aiSeat = { type: "ai", strategy: activeStrategy };
+    // 只有需要模型时才读 activeModel.id（"ai" 分支下 activeModel 可能是 null）。
+    const modelSeat = needsModel
+      ? { type: "model", model_id: Number(activeModel.id) }
+      : null;
+    let seats;
+    if (seatCount >= 2) {
+      if (activeChoice === "ai") {
+        seats = [
+          { seat: "p0", occupant: "me", controller: human },
+          { seat: "p1", occupant: null, controller: aiSeat },
+        ];
+      } else if (activeChoice === "model") {
+        seats = [
+          { seat: "p0", occupant: "me", controller: human },
+          { seat: "p1", occupant: null, controller: modelSeat },
+        ];
+      } else {
+        seats = [
+          { seat: "p0", occupant: "me", controller: modelSeat },
+          { seat: "p1", occupant: null, controller: aiSeat },
+        ];
+      }
+    } else if (activeChoice === "ai") {
+      seats = [{ seat: "p0", occupant: "me", controller: aiSeat }];
+    } else if (activeChoice === "model") {
+      seats = [{ seat: "p0", occupant: "me", controller: modelSeat }];
+    } else {
+      seats = [{ seat: "p0", occupant: "me", controller: human }];
+    }
+    // 单机练习：kind=pve 时 mode 只能是 practice；unlisted 不进大厅列表。
+    const body = { game: slug, seats, mode: "practice", visibility: "unlisted" };
+    if (seedNumber !== undefined) body.settings = { seed: seedNumber };
+    setCreating(true);
     try {
-      const data = await post("/api/v1/" + slug + "/play/sessions", {}, token);
-      sessRef.current = data.session.id;
-      stateRef.current = data.session.state;
-      setSessionId(data.session.id);
-      setState(data.session.state);
-      setOver(null);
-      setMatchId(null);
-      setRankMsg(null);
-      setActionInput("");
+      const view = await post("/api/v2/matches", body, token);
+      if (!mountedRef.current) return;
+      if (!view || !view.id) {
+        toast.error("服务端没有返回对局 id");
+        return;
+      }
+      toast.success(
+        activeChoice === "model" && seatCount >= 2
+          ? "对局已创建，模型坐在对面自动出招"
+          : activeChoice === "model" || activeChoice === "model-self"
+            ? "对局已创建，模型代打你的座位"
+            : activeChoice === "ai" && seatCount < 2
+              ? "对局已创建，AI 演示会自动推进"
+              : "对局已创建",
+      );
+      navigate(`/m/${view.id}`);
     } catch (e) {
-      if (e && e.status === 401) {
+      if (!mountedRef.current) return;
+      if (e && (e.code === "login_required" || e.status === 401)) {
         toast.error("登录已过期，请重新登录");
         openAuth("login");
       } else {
-        toast.error("无法开始对局：" + (e.message || "未知错误"));
+        toast.error(errorText(e));
       }
-    }
-  }, [slug, token, user, openAuth]);
-
-  useEffect(() => {
-    if (!authReady) return;
-    if (!(meta && info && info.game === slug && user)) return undefined;
-    let cancelled = false;
-    (async () => {
-      try {
-        const wanted = new URLSearchParams(window.location.search).get("resume");
-        const data = await getJson("/api/v1/play/active", token);
-        if (cancelled) return;
-        const mine = (data.sessions || []).find(
-          (item) => item.game === slug && item.kind === "pve" && (!wanted || item.id === wanted),
-        ) || (data.sessions || []).find((item) => item.game === slug && item.kind === "pve");
-        if (!mine) throw new Error("no active session");
-        const detail = await getJson("/api/v1/" + slug + "/play/sessions/" + mine.id, token);
-        if (cancelled) return;
-        sessRef.current = detail.session.id;
-        stateRef.current = detail.session.state;
-        setSessionId(detail.session.id);
-        setState(detail.session.state);
-        setOver(null);
-        setMatchId(detail.session.match_id || null);
-        toast.info("已恢复未完成的试玩对局");
-      } catch (e) {
-        if (!cancelled) newGame();
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authReady, meta, info, user, slug, token]);
-
-  useEffect(() => {
-    if (!authReady || user || !info || info.game !== slug) return undefined;
-    const controller = new AbortController();
-    const env = createOpenEnvClient(slug, { signal: controller.signal });
-    env.reset({ seed: 42, version: info.version, obs_mode: "state" })
-      .then((data) => {
-        if (!controller.signal.aborted) setPreview((data.observation && data.observation.state) || null);
-      })
-      .catch(() => {})
-      .finally(() => env.close());
-    return () => {
-      controller.abort();
-      env.close();
-    };
-  }, [authReady, user, info, slug]);
-
-  useEffect(() => {
-    return () => {
-      const sid = sessRef.current;
-      if (sid) {
-        post("/api/v1/" + slug + "/play/sessions/" + sid + "/leave", {}, token).catch(() => {});
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [slug, token]);
-
-  const doStep = useCallback(
-    async (action) => {
-      if (pendingRef.current || !sessRef.current) return;
-      pendingRef.current = true;
-      try {
-        const expected = (stateRef.current && stateRef.current.tick) || 0;
-        const data = await post(
-          "/api/v1/" + slug + "/play/sessions/" + sessRef.current + "/actions",
-          { actions: action, expected_tick: expected },
-          token,
-        );
-        stateRef.current = data.state;
-        setState(data.state);
-        if (data.done) {
-          setAiMode(false);
-          setMatchId(data.match_id ?? null);
-          setOver({ cause: data.cause, winner: data.winner, state: data.state });
-        }
-      } catch (e) {
-        toast.error(e.message || "操作失败");
-        setAiMode(false);
-        if (e.status === 409) {
-          try {
-            const data = await getJson(
-              "/api/v1/" + slug + "/play/sessions/" + sessRef.current,
-              token,
-            );
-            stateRef.current = data.session.state;
-            setState(data.session.state);
-          } catch (err) {
-            /* keep old snapshot */
-          }
-        }
-      } finally {
-        pendingRef.current = false;
-      }
-    },
-    [slug, token],
-  );
-
-  useEffect(() => {
-    if (!controls || !user) return undefined;
-    const onKey = (event) => {
-      if ((stateRef.current && stateRef.current.done) || aiMode || pendingRef.current) return;
-      const bind = controls.keys && controls.keys[event.code];
-      if (!bind) return;
-      event.preventDefault();
-      const [value] = bind;
-      if (controls.mode === "relative-turn") {
-        const current = stateRef.current && stateRef.current[controls.direction_field];
-        const rel = current == null ? null : relativeAction(current, value);
-        if (rel !== null) doStep(rel);
-      } else {
-        doStep(value);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [controls, aiMode, doStep, user]);
-
-  const submitChoice = (index) => {
-    if (state && state.done) return;
-    doStep(index);
-  };
-
-  const submitNumber = () => {
-    if (state && state.done) return;
-    const value = Number(actionInput);
-    if (!Number.isInteger(value)) {
-      toast.warning("请输入一个整数动作");
-      return;
-    }
-    doStep(value);
-  };
-
-  const aiTick = useCallback(async () => {
-    if (pendingRef.current || (stateRef.current && stateRef.current.done)) return;
-    pendingRef.current = true;
-    try {
-      const current = stateRef.current;
-      const strategy = (meta && meta.ai_strategies && meta.ai_strategies[0]) || "default";
-      const data = await post("/api/" + slug + "/ai/action", { state: current, strategy }, token);
-      pendingRef.current = false;
-      const action = data && data.action !== undefined ? data.action : data;
-      await doStep(action);
-    } catch (e) {
-      pendingRef.current = false;
-      toast.error("AI 请求失败：" + (e.message || "未知错误"));
-      setAiMode(false);
-    }
-  }, [slug, token, meta, doStep]);
-
-  useEffect(() => {
-    if (!aiMode || (state && state.done)) return undefined;
-    const timer = setInterval(aiTick, 350);
-    return () => clearInterval(timer);
-  }, [aiMode, state && state.done, aiTick]);
-
-  const submitScore = async (name) => {
-    if (!matchId) {
-      toast.error("该对局没有服务端记录，无法上榜");
-      return;
-    }
-    try {
-      const data = await post("/api/" + slug + "/scores", { match_id: matchId, name }, token);
-      try {
-        localStorage.setItem("ugc-name", name);
-      } catch (e) {
-        /* ignore */
-      }
-      setRankMsg("已上榜！当前排名 #" + data.rank);
-      loadLeaderboard();
-    } catch (e) {
-      toast.error("提交失败：" + (e.message || "未知错误"));
+    } finally {
+      if (mountedRef.current) setCreating(false);
     }
   };
 
-  if (loadErr) {
+  if (gamesQuery.loading && !gamesQuery.data) return <Loading label="加载游戏环境" />;
+
+  if (gamesQuery.error) {
+    return (
+      <>
+        <div className="lab-page-head">
+          <div className="lab-page-head__copy">
+            <h1 className="lab-h1">单机准备</h1>
+            <p className="lab-subtitle">{String(slug || "").toUpperCase()} · 练习局</p>
+          </div>
+        </div>
+        <ErrorNote error={gamesQuery.error} onRetry={gamesQuery.reload} />
+      </>
+    );
+  }
+
+  if (!game) {
     return (
       <div className="lab-card">
         <EmptyState
           icon={<Gamepad2 size={16} />}
           title="无法加载游戏"
-          desc={loadErr}
+          desc="游戏不存在或未公开。"
           action={
-            <LinkButton variant="outline" size="sm" href={`/environments/${slug}`}>
+            <LinkButton variant="outline" size="sm" href="/environments">
               <ArrowLeft size={13} />
-              回到环境详情
+              回到环境列表
             </LinkButton>
           }
         />
@@ -364,18 +288,17 @@ export default function Play() {
     );
   }
 
-  if (!meta || !info) return <Loading label="加载游戏环境" />;
-
-  const shown = state || preview;
-  const score = Math.round(Number((state && (state.score ?? state.reward)) || 0));
-  const hints = controlHint(controls);
-  const gameTitle = meta.title || slug;
-  const fitKey = [
-    slug,
-    shown && shown.tick,
-    Array.isArray(shown && shown.board) ? shown.board.length : "",
-    Array.isArray(shown && shown.render_board) ? shown.render_board.length : "",
-  ].join(":");
+  const gameTitle = meta.title || game.name || slug;
+  const hints = controlHints(controls);
+  const leaderboard = (leaderboardQuery.data && leaderboardQuery.data.items) || [];
+  const outShape = contract && Array.isArray(contract.out_shape) ? contract.out_shape : null;
+  const hudText = hud.length
+    ? hud.map((item) => item.label || item.kind || "—").join(" / ")
+    : "—";
+  // 模型列表是异步的：还没有 AI 策略时，登录用户的模型可能稍后到达，
+  // 先按"可配置"渲染，避免闪一下"更适合人类对战"的空态。
+  const awaitingModels = seatCount === 2 && strategies.length === 0 && modelsQuery.loading;
+  const canConfigure = seatCount === 1 || options.length > 0 || awaitingModels;
 
   return (
     <>
@@ -384,151 +307,281 @@ export default function Play() {
           <div className="lab-row" style={{ gap: 10, flexWrap: "wrap" }}>
             <h1 className="lab-h1">{gameTitle}</h1>
             <Chip>{String(slug).toUpperCase()}</Chip>
-            <Pill tone="neutral" dot>
-              验证支线
-            </Pill>
             {meta.version ? <Chip>v{meta.version}</Chip> : null}
+            <Pill tone="neutral" dot>
+              单机准备
+            </Pill>
           </div>
-          <p className="lab-subtitle">{meta.description || (info && info.action_space) || "人工试玩与内置 AI 演示"}</p>
+          <p className="lab-subtitle">
+            {meta.description || game.description || "选择对手后开始一局练习；对局在 /m/:id 舞台进行。"}
+          </p>
         </div>
         <div className="lab-page-head__actions">
           <LinkButton variant="outline" size="sm" href={`/environments/${slug}`}>
-            <Gauge size={13} />
+            <Gamepad2 size={13} />
             环境详情
           </LinkButton>
           {pvpEnabled ? (
-            <LinkButton variant="primary" size="sm" href={`/games/${slug}/pvp`}>
+            <LinkButton variant="primary" size="sm" href={pvpPath}>
               <Swords size={13} />
-              去对战
+              人类对战大厅
             </LinkButton>
           ) : null}
-          <LinkButton variant="outline" size="sm" href="/models">
-            <Box size={13} />
-            模型挑战
-          </LinkButton>
         </div>
       </div>
 
       <div className="play-layout">
         <div className="play-main">
-          <div className="play-board-panel">
-            <div className="play-board-head">
-              <span className="envp-preview__live">
-                <i aria-hidden="true" /> LIVE BOARD
-              </span>
-              <div className="lab-row" style={{ gap: 10 }}>
-                {state ? (
-                  <span className="play-board-note">TICK {state.tick ?? 0}</span>
-                ) : (
-                  <span className="play-board-note">INITIAL STATE</span>
-                )}
-                <span className="play-board-note">SERVER-AUTHORITATIVE</span>
+          {canConfigure ? (
+            <div className="play-board-panel">
+              <div className="play-board-head">
+                <span className="envp-preview__live">
+                  <i aria-hidden="true" /> MATCH SETUP
+                </span>
+                <div className="lab-row" style={{ gap: 8 }}>
+                  <Pill tone="neutral">PRACTICE</Pill>
+                  <span className="play-board-note">
+                    {seatCount} SEAT{seatCount > 1 ? "S" : ""} · PRACTICE · UNLISTED
+                  </span>
+                </div>
               </div>
-            </div>
-            {shown && (shown.board || shown.render_board) ? (
-              <BoardFrame fitKey={fitKey} minHeight={620}>
-                <UgBoard state={shown} meta={meta} />
-              </BoardFrame>
-            ) : (
-              <div className="lab-empty">
-                <div className="lab-empty__title">当前环境没有可渲染的棋盘</div>
-                <p className="lab-empty__desc">
-                  {info && info.action_space ? `动作空间：${info.action_space}` : "可以直接提交动作推进对局。"}
-                </p>
-              </div>
-            )}
-            <div className="play-status-line">
-              <span className="lab-mono" style={{ fontSize: 8 }}>
-                {state ? (state.done ? "FINISHED" : "IN PROGRESS") : user ? "READY" : "PREVIEW · 登录后可操作"}
-              </span>
-              <span className="lab-grow" />
-              {state ? <span>奖励 {Math.round(Number(state.reward || 0) * 100) / 100}</span> : null}
-            </div>
-          </div>
 
-          {!user ? (
-            <div className="play-gate">
-              <div>
-                <div className="lab-empty__title">登录后开始对局</div>
-                <p className="lab-empty__desc">
-                  {preview
-                    ? "上面是初始棋盘预览；登录后可以对局并把分数送上排行榜。"
-                    : "游客可以看棋盘与排行榜，对局需要账号。"}
-                </p>
-              </div>
-              <div className="lab-row" style={{ gap: 8 }}>
-                <Button variant="primary" onClick={() => openAuth("login")}>
-                  登录 / 注册
-                </Button>
-                <LinkButton variant="outline" href="/environments">
-                  看看其它环境
-                </LinkButton>
+              <div style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "flex-start" }}>
+                <div
+                  style={{
+                    flex: "1 1 200px",
+                    maxWidth: 260,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 10,
+                  }}
+                >
+                  <div className="play-mini">
+                    <MiniBoard game={slug} size="lg" tag={null} />
+                  </div>
+                  <span className="play-board-note">
+                    {board ? `BOARD ${board.width}×${board.height}` : "RENDER PREVIEW"}
+                  </span>
+                </div>
+
+                <div
+                  style={{
+                    flex: "1 1 300px",
+                    minWidth: 0,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 12,
+                  }}
+                >
+                  {awaitingModels ? (
+                    <Loading label="载入可代打的模型" />
+                  ) : options.length > 1 ? (
+                    <Tabs
+                      items={options.map((item) => ({ key: item.key, label: item.label }))}
+                      value={activeChoice || ""}
+                      onChange={setChoice}
+                    />
+                  ) : (
+                    <p className="lab-subtitle" style={{ margin: 0, fontSize: 11.5 }}>
+                      {seatCount >= 2
+                        ? "当前没有可配置的单机对手，去大厅约战或上传模型。"
+                        : "单座练习：自己玩；也可以让服务端 AI 或你的模型代打。"}
+                    </p>
+                  )}
+                  {activeChoice === "ai" ? (
+                    <Field
+                      label="AI 策略"
+                      hint={seatCount >= 2
+                        ? "对手座位由服务端托管，练习局不计 ELO"
+                        : "服务端托管你的座位自动演示，练习局不计 ELO"}
+                    >
+                      <select
+                        className="lab-select"
+                        value={activeStrategy || ""}
+                        onChange={(event) => setStrategy(event.target.value)}
+                      >
+                        {strategies.map((item) => (
+                          <option key={item} value={item}>
+                            {item}
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
+                  ) : null}
+                  {activeChoice === "model" || activeChoice === "model-self" ? (
+                    <Field
+                      label="我的模型"
+                      hint={activeChoice === "model-self"
+                        ? "模型代打 p0；p1 由 AI 策略托管"
+                        : "只列出属于你、且通过契约校验的 active 模型"}
+                    >
+                      {modelsQuery.loading ? (
+                        <Loading label="载入模型" />
+                      ) : models.length ? (
+                        <select
+                          className="lab-select"
+                          value={activeModel ? String(activeModel.id) : ""}
+                          onChange={(event) => setModelId(event.target.value)}
+                        >
+                          {models.map((model) => (
+                            <option key={model.id} value={model.id}>
+                              {model.name} · #{model.id}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <span className="lab-subtitle" style={{ fontSize: 11.5 }}>
+                          还没有可用于本环境的模型。去{" "}
+                          <Link className="lab-link lab-link--lime" to="/models">
+                            模型工作台
+                          </Link>{" "}
+                          上传 ONNX 后即可让模型代打。
+                        </span>
+                      )}
+                    </Field>
+                  ) : null}
+                  {activeChoice === "model-self" ? (
+                    <Field label="对手 AI 策略">
+                      <select
+                        className="lab-select"
+                        value={activeStrategy || ""}
+                        onChange={(event) => setStrategy(event.target.value)}
+                      >
+                        {strategies.map((item) => (
+                          <option key={item} value={item}>
+                            {item}
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
+                  ) : null}
+
+                  <Field
+                    label="随机种子（可选）"
+                    hint="留空 = 随机；指定 seed 的练习局不会进入排行榜"
+                  >
+                    <input
+                      className="lab-input"
+                      value={seed}
+                      placeholder="例如 42"
+                      inputMode="numeric"
+                      onChange={(event) => setSeed(event.target.value)}
+                    />
+                  </Field>
+
+                  <div className="lab-row" style={{ gap: 8 }}>
+                    <Button
+                      variant="primary"
+                      onClick={create}
+                      disabled={creating || awaitingModels || options.length === 0}
+                    >
+                      <PlayIcon size={13} />
+                      {creating ? "创建中…" : "开始对局"}
+                    </Button>
+                    {pvpEnabled ? (
+                      <LinkButton variant="outline" size="sm" href={pvpPath}>
+                        <Swords size={13} />
+                        去大厅约战
+                      </LinkButton>
+                    ) : null}
+                  </div>
+                  {!loggedIn ? (
+                    <span className="lab-subtitle" style={{ fontSize: 10.5 }}>
+                      游客可以查看环境信息；开始对局需要登录。
+                    </span>
+                  ) : null}
+                </div>
               </div>
             </div>
           ) : (
-            <div className="play-controls">
-              <div className="play-controls-row">
-                {choices ? (
-                  choices.map((choice, index) => (
-                    <button
-                      key={index}
-                      type="button"
-                      className="play-choice"
-                      disabled={Boolean(state && state.done) || aiMode}
-                      onClick={() => submitChoice(index)}
-                    >
-                      {choice}
-                    </button>
-                  ))
-                ) : (
-                  <>
-                    <input
-                      className="play-action-input"
-                      placeholder="动作（整数）"
-                      value={actionInput}
-                      disabled={Boolean(state && state.done) || aiMode}
-                      onChange={(event) => setActionInput(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") submitNumber();
-                      }}
-                    />
-                    <Button
-                      variant="primary"
-                      disabled={Boolean(state && state.done) || aiMode}
-                      onClick={submitNumber}
-                    >
-                      提交动作
+            <div className="lab-card">
+              <EmptyState
+                icon={<Swords size={16} />}
+                title={pvpEnabled ? "这个环境更适合人类对战" : "暂时没有可用的单机对手"}
+                desc={
+                  !loggedIn && contract
+                    ? "登录后可以用自己已托管的模型代打；也可以去人类对战大厅约战。"
+                    : "没有可配置的 AI 策略或模型对手，请到人类对战大厅创建/加入房间。"
+                }
+                action={
+                  pvpEnabled ? (
+                    <LinkButton variant="primary" size="sm" href={pvpPath}>
+                      <Swords size={13} />
+                      进入对战大厅
+                    </LinkButton>
+                  ) : !loggedIn ? (
+                    <Button variant="primary" size="sm" onClick={() => openAuth("login")}>
+                      登录 / 注册
                     </Button>
-                  </>
-                )}
-              </div>
-              <div className="play-controls-row">
-                <Button variant="outline" size="sm" onClick={newGame}>
-                  <RotateCcw size={12} />
-                  再来一局
-                </Button>
-                {hasAI ? (
-                  <Button
-                    variant={aiMode ? "primary" : "outline"}
-                    size="sm"
-                    onClick={() => setAiMode((value) => !value)}
-                  >
-                    <Bot size={12} />
-                    {aiMode ? "停止 AI 演示" : "内置 AI 演示"}
-                  </Button>
-                ) : null}
-                {hasModelChallenge ? (
-                  <Link className="lab-btn lab-btn--ghost lab-btn--sm" to="/models">
-                    <Trophy size={12} />
-                    模型托管
-                  </Link>
-                ) : null}
-                <span className="lab-grow" />
-                <span className="play-board-note">
-                  {choices ? "点击选项推进一回合" : "输入动作整数后提交"}
-                </span>
-              </div>
-              {hints.length ? (
+                  ) : null
+                }
+              />
+            </div>
+          )}
+
+          <div className="lab-card" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div className="lab-card__head">
+              <span className="lab-card__title">HUMAN VS HUMAN</span>
+              <Swords size={12} style={{ color: "var(--lab-text-3)" }} />
+            </div>
+            {pvpEnabled ? (
+              <>
+                <p className="lab-subtitle" style={{ margin: 0, fontSize: 11.5, lineHeight: 1.65 }}>
+                  两个人类座位就是 PvP：在大厅创建公开/私有房间、输入邀请码，或快速匹配。
+                  创建的房间会直接进入 <span className="lab-mono">/m/:id</span> 舞台。
+                </p>
+                <div className="lab-row" style={{ gap: 8 }}>
+                  <LinkButton variant="outline" size="sm" href={pvpPath}>
+                    <Users size={13} />
+                    进入对战大厅
+                  </LinkButton>
+                  <LinkButton variant="outline" size="sm" href="/models">
+                    <Box size={13} />
+                    托管模型
+                  </LinkButton>
+                </div>
+              </>
+            ) : (
+              <p className="lab-subtitle" style={{ margin: 0, fontSize: 11.5 }}>
+                该环境没有声明 PvP 能力（game.yaml 未开启 pvp.enabled），只能单机练习。
+              </p>
+            )}
+          </div>
+        </div>
+
+        <aside className="play-side">
+          <div className="lab-card" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div className="lab-card__head">
+              <span className="lab-card__title">GAME INFO</span>
+              <span className="lab-mono" style={{ fontSize: 8 }}>
+                {meta.version ? `v${meta.version}` : "—"}
+              </span>
+            </div>
+            <div className="play-kv">
+              <span>棋盘</span>
+              <b>{board ? `${board.width}×${board.height}` : "—"}</b>
+            </div>
+            <div className="play-kv">
+              <span>HUD</span>
+              <b style={{ textAlign: "right", maxWidth: 170 }}>{hudText}</b>
+            </div>
+            <div className="play-kv">
+              <span>动作空间</span>
+              <b>{outShape ? `[${outShape.join(", ")}]` : "—"}</b>
+            </div>
+            <div className="play-kv">
+              <span>座位</span>
+              <b>{seatCount}</b>
+            </div>
+            <div className="play-kv">
+              <span>AI 策略</span>
+              <b style={{ textAlign: "right", maxWidth: 170 }}>
+                {strategies.length ? strategies.join(", ") : "—"}
+              </b>
+            </div>
+            {hints.length ? (
+              <>
+                <hr className="lab-rule" />
                 <div className="play-keys">
                   {hints.map((hint) => (
                     <span className="play-key" key={hint.key}>
@@ -537,128 +590,66 @@ export default function Play() {
                     </span>
                   ))}
                 </div>
-              ) : null}
-            </div>
-          )}
-        </div>
-
-        <aside className="play-side">
-          <div className="lab-card" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <div className="lab-card__head">
-              <span className="lab-card__title">CURRENT RUN</span>
-              <Pill tone={state ? (state.done ? "neutral" : "green") : "neutral"} dot>
-                {state ? (state.done ? "FINISHED" : "LIVE") : "PREVIEW"}
-              </Pill>
-            </div>
-            <div className="play-score">
-              <span className="play-score__num">{score}</span>
-              <span className="play-score__cap">SCORE</span>
-            </div>
-            <div className="play-kv">
-              <span>游戏</span>
-              <b>{String(slug).toUpperCase()}</b>
-            </div>
-            <div className="play-kv">
-              <span>版本</span>
-              <b>{meta.version || "—"}</b>
-            </div>
-            <div className="play-kv">
-              <span>动作空间</span>
-              <b>{choices ? `choice × ${choices.length}` : (info.action_space || "integer")}</b>
-            </div>
-            <div className="play-kv">
-              <span>会话</span>
-              <b>{sessionId ? sessionId.slice(0, 8) : "—"}</b>
-            </div>
-            <hr className="lab-rule" />
-            <span className="lab-mono" style={{ fontSize: 8 }}>
-              分数由服务端从对局读取，客户端不能自报。
-            </span>
+              </>
+            ) : null}
           </div>
 
           <div className="lab-card" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             <div className="lab-card__head">
               <span className="lab-card__title">LEADERBOARD</span>
-              <span className="lab-mono" style={{ fontSize: 8 }}>TOP 10</span>
+              <span className="lab-mono" style={{ fontSize: 8 }}>ELO TOP 10</span>
             </div>
-            {leaderboard.length === 0 ? (
-              <EmptyState icon={<Trophy size={15} />} title="暂无记录" desc="完成一局并提交分数后会出现在这里。" />
+            {leaderboardQuery.error ? (
+              <ErrorNote error={leaderboardQuery.error} onRetry={leaderboardQuery.reload} />
+            ) : leaderboard.length === 0 ? (
+              <EmptyState
+                icon={<Trophy size={15} />}
+                title="暂无记录"
+                desc="完成一局不计 seed 的对局后，服务端会自动把成绩入榜。"
+              />
             ) : (
-              leaderboard.map((item) => (
-                <div className="play-lb-row" key={item.rank}>
-                  <span className={`play-lb-rank${item.rank === 1 ? " is-top" : ""}`}>
-                    #{item.rank}
+              leaderboard.slice(0, 10).map((item, index) => (
+                <div className="play-lb-row" key={item.user_id != null ? item.user_id : index}>
+                  <span className={`play-lb-rank${index === 0 ? " is-top" : ""}`}>
+                    #{index + 1}
                   </span>
-                  <span className="play-lb-name">{item.name}</span>
-                  <span className="play-lb-score">{item.score}</span>
+                  <span className="play-lb-name">
+                    {item.name}
+                    {user && item.user_id === user.id ? "（我）" : ""}
+                  </span>
+                  <span className="play-lb-score">{item.rating != null ? item.rating : "—"}</span>
                 </div>
               ))
             )}
           </div>
 
           <div className="lab-card" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <span className="lab-card__title">VALIDATION LAYER</span>
+            <span className="lab-card__title">FAIR PLAY</span>
             <span className="lab-subtitle" style={{ fontSize: 11, lineHeight: 1.65 }}>
-              网页试玩用同一套游戏引擎核对动力学与规则，不替代训练闭环；对局与分数都会落库。
+              分数由服务端在结算时读取对局状态自动入榜，客户端不能自报；指定 seed 的练习局
+              可以离线搜索最优解，因此不会进入排行榜。
             </span>
-            <Link
-              className="lab-btn lab-btn--ghost lab-btn--sm"
-              to={`/environments/${slug}`}
-              style={{ justifyContent: "flex-start", padding: 0 }}
-            >
-              <Upload size={12} />
-              环境契约与渲染声明
-            </Link>
+            <span className="lab-mono" style={{ fontSize: 8 }}>
+              POST /api/v2/matches → /m/:id
+            </span>
           </div>
+
+          {!loggedIn ? (
+            <div className="lab-card" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <div className="lab-card__head">
+                <span className="lab-card__title">LOGIN</span>
+                <Bot size={12} style={{ color: "var(--lab-text-3)" }} />
+              </div>
+              <span className="lab-subtitle" style={{ fontSize: 11 }}>
+                登录后可以开始练习局、托管模型并参与 PvP。
+              </span>
+              <Button variant="primary" size="sm" onClick={() => openAuth("login")}>
+                登录 / 注册
+              </Button>
+            </div>
+          ) : null}
         </aside>
       </div>
-
-      {over ? (
-        <Modal
-          title={over.winner === 0 ? "通关！" : over.winner === null ? "对局结束" : "游戏结束"}
-          onClose={() => setOver(null)}
-        >
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <div className="play-score">
-              <span className="play-score__num">{Math.round(Number((over.state && (over.state.score ?? over.state.reward)) || 0))}</span>
-              <span className="play-score__cap">FINAL SCORE</span>
-            </div>
-            <p className="lab-subtitle" style={{ margin: 0 }}>
-              {over.cause || "对局已结束"}
-              {matchId ? ` · MATCH #${matchId}` : " · 无服务端记录"}
-            </p>
-            <Field label="上榜名字" hint="1–24 个字符">
-              <input
-                className="lab-input"
-                value={submitName}
-                maxLength={24}
-                onChange={(event) => setSubmitName(event.target.value)}
-                placeholder="你的名字"
-              />
-            </Field>
-            {rankMsg ? <div className="envp-valid">{rankMsg}</div> : null}
-            <div className="lab-modal__actions">
-              <Button
-                variant="outline"
-                onClick={() => {
-                  const name = submitName.trim();
-                  if (!name) {
-                    toast.warning("请输入名字");
-                    return;
-                  }
-                  submitScore(name);
-                }}
-              >
-                提交排行榜
-              </Button>
-              <Button variant="primary" onClick={newGame}>
-                <PlayIcon size={13} />
-                再来一局
-              </Button>
-            </div>
-          </div>
-        </Modal>
-      ) : null}
     </>
   );
 }

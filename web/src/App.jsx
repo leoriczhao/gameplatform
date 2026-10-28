@@ -1,4 +1,4 @@
-import { BrowserRouter, Outlet, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Navigate, Outlet, Routes, Route } from "react-router-dom";
 import { Toaster } from "sonner";
 
 import { LabThemeProvider, useLabTheme } from "./lab/ThemeContext.jsx";
@@ -16,9 +16,8 @@ import LabFriends from "./lab/pages/Friends.jsx";
 import LabNotifications from "./lab/pages/Notifications.jsx";
 import LabUgcUpload from "./lab/pages/UgUpload.jsx";
 import LabAdmin from "./lab/pages/Admin.jsx";
-import LabWatch from "./lab/pages/Watch.jsx";
-import LabWatchReplay from "./lab/pages/WatchReplay.jsx";
 import LabNotFound from "./lab/pages/NotFound.jsx";
+import Stage from "./stage/Stage.jsx";
 
 function ThemedToaster() {
   const { theme } = useLabTheme();
@@ -55,8 +54,10 @@ export default function App() {
               <Route path="/games/ugc/:slug/pvp" element={<LabPvp />} />
               <Route path="/games/:slug" element={<LabPlay />} />
               <Route path="/games/:slug/pvp" element={<LabPvp />} />
-              <Route path="/watch/match/:matchId" element={<LabWatchReplay />} />
-              <Route path="/watch/:game/:sessionId" element={<LabWatch />} />
+              <Route path="/m/:id" element={<Stage />} />
+              {/* 旧观战链接（v1 会话回放 / 旧对局 id）统一回到对局列表；M4 做记录 → uid 映射 */}
+              <Route path="/watch/match/:matchId" element={<Navigate to="/matches" replace />} />
+              <Route path="/watch/:game/:sessionId" element={<Navigate to="/matches" replace />} />
               <Route path="/profile" element={<LabProfile />} />
               <Route path="/friends" element={<LabFriends />} />
               <Route path="/notifications" element={<LabNotifications />} />

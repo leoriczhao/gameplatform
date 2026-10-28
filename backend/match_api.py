@@ -270,12 +270,14 @@ def rematch(uid: str, request: Request) -> dict:
 
 # ------------------------------------------------------------------ chat
 
-def _require_player(uid: str, principal: dict) -> None:
+def _require_player(uid: str, principal: dict):
+    """Seat check for room chat; returns the live match, or None once sealed."""
     m, rec = _readable(uid, principal)
     seated = (m.seat_of(principal["id"]) if m else
               any(p.get("user_id") == principal["id"] for p in rec["players"]))
     if not seated:
         raise HTTPException(403, {"code": "not_your_seat", "message": "仅对局双方可以聊天"})
+    return m
 
 
 @router.get("/api/v2/matches/{uid}/chat", summary="对局聊天（since 游标轮询）")
@@ -289,11 +291,16 @@ def chat_get(uid: str, request: Request, since: int = Query(0, ge=0)) -> dict:
 @router.post("/api/v2/matches/{uid}/chat", summary="发送对局聊天")
 def chat_post(uid: str, body: ChatIn, request: Request) -> dict:
     principal = _user(request)
-    _require_player(uid, principal)
+    m = _require_player(uid, principal)
     try:
-        return {"message": social.chat_send(f"m:{uid}", principal["id"], body.text)}
+        message = social.chat_send(f"m:{uid}", principal["id"], body.text)
     except ValueError as e:
         raise HTTPException(400, {"code": "bad_message", "message": str(e)})
+    if m is not None:
+        # Chat is polled over REST, so the timeline gets a mark instead of a
+        # chat payload: mark text never leaves the players' stream (§7.3).
+        m.record_mark("chat", seat=m.seat_of(principal["id"]))
+    return {"message": message}
 
 
 # ------------------------------------------------------------------ matchmaking

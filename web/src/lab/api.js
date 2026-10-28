@@ -102,14 +102,6 @@ export function useMatches(token, enabled) {
   return useAsync(() => getJson("/api/v1/matches", token), [token], { enabled });
 }
 
-export function useMatchReplay(matchId) {
-  return useAsync(
-    () => getJson(`/api/v1/matches/${matchId}/replay`),
-    [matchId],
-    { enabled: Boolean(matchId) },
-  );
-}
-
 export function useLeaderboard(game, token, enabled) {
   return useAsync(
     () => getJson(`/api/v1/leaderboards/${encodeURIComponent(game)}?scope=total`, token),

@@ -35,16 +35,23 @@ class MatchStatus(str, Enum):
     RUNNING = "running"
     FINISHED = "finished"
     FAILED = "failed"
+    # v2（设计 17）的对局状态；历史记录可能出现 aborted/cancelled。
+    WAITING = "waiting"
+    ACTIVE = "active"
+    ABORTED = "aborted"
+    CANCELLED = "cancelled"
 
 
 class MatchMode(str, Enum):
     RANKED = "ranked"
     CASUAL = "casual"
+    PRACTICE = "practice"      # v2：单机练习局
 
 
 class SessionVisibility(str, Enum):
     PUBLIC = "public"
     PRIVATE = "private"
+    UNLISTED = "unlisted"      # v2：凭链接可读、不进大厅
 
 
 class PlayerSide(str, Enum):
@@ -199,7 +206,8 @@ class StoredReplay(BaseModel):
 class MatchResult(BaseModel):
     model_config = ConfigDict(extra="allow")
 
-    winner: int | None = None
+    # v1 是 0/1；v2（设计 17）用座位 id "p0"/"p1"，过渡期两种都接受。
+    winner: int | str | None = None
     cause: str | None = None
     mode: MatchMode | None = None
     damage: list[int] | None = None
@@ -220,6 +228,11 @@ class MatchRecord(BaseModel):
     created_at: float = Field(description="Unix timestamp in seconds")
     finished_at: float | None = Field(
         default=None, description="Unix timestamp in seconds")
+    # v2 记录（设计 17）：uid 是对外 id，/m/:id 舞台用；v1 旧记录为 None。
+    uid: str | None = None
+    mode: MatchMode | None = None
+    visibility: SessionVisibility | None = None
+    version: str | None = None
 
 
 class CreateMatchResponse(BaseModel):
