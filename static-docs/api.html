@@ -264,12 +264,12 @@ pre code { background: none; border: none; padding: 0; color: inherit; }
 <tr><th>类别</th><th>接口</th><th>鉴权</th><th>说明</th></tr>
 <tr><td><b>① 平台级</b></td><td><code>GET /api/games</code> · <code>GET /api/health</code></td><td>无</td><td>游戏目录（含每游戏元数据）、健康检查</td></tr>
 <tr><td><b>② 环境交互（唯一入口）</b></td><td><code>/api/openenv/{game}</code> · <code>WS /ws</code></td><td>无</td><td>官方 OpenEnv 0.4.1，<b>一连接一实例</b>；<code>reset/step/state</code>，每游戏共享并发上限 64</td></tr>
-<tr><td><b>③ 在线游玩</b></td><td><code>POST /api/{game}/ai/action</code> · <code>GET/POST /api/{game}/scores</code></td><td>无</td><td>内置 AI 演示、排行榜</td></tr>
+<tr><td><b>③ AI 与排行榜</b></td><td><code>POST /api/{game}/ai/action</code> · <code>GET /api/{game}/scores</code></td><td>无</td><td>内置 AI 咨询、只读排行榜；合格成绩由服务端结算</td></tr>
 <tr><td><b>④ 账号 v1</b></td><td><code>POST /api/v1/auth/register|login|guest</code> · <code>GET /api/v1/auth/me</code></td><td>—</td><td>注册/登录返回 JWT；游客每人一个浏览器身份</td></tr>
-<tr><td><b>⑤ 游玩会话 v1</b></td><td><code>POST/GET /api/v1/{game}/play/sessions/*</code><br><code>/api/v1/{game}/play/rooms*</code></td><td>登录用户（游客只能观战/看榜）</td><td><b>服务器权威</b>对局：PvE 单人打 AI/模型、PvP 房间（公开列表/邀请码）+ ranked/casual</td></tr>
+<tr><td><b>⑤ 对局 v2</b></td><td><code>/api/v2/matches</code> · <code>/api/v2/{game}/matchmaking/*</code></td><td>创建和操作需登录；读取按可见性控制</td><td>统一练习、PvP、模型对战、观战和帧回放；命令走 REST，事件走 SSE</td></tr>
 <tr><td><b>⑥ 模型托管 v1</b></td><td><code>POST/GET/DELETE /api/v1/models/*</code></td><td>Bearer（用户）</td><td>上传 ONNX → 契约校验 → PvE 对手 / 模型代打 / 模型对战</td></tr>
-<tr><td><b>⑦ 对战与积分 v1</b></td><td><code>POST/GET /api/v1/matches/*</code> · <code>GET /api/v1/ratings/{game}</code></td><td>Bearer（用户）</td><td>模型 vs 模型异步对战、对局记录、ELO 积分榜</td></tr>
-<tr><td><b>⑧ 自定义模型协议</b></td><td>你自己的 HTTPS 服务（游戏每步 <code>POST {state}</code> 给你，你返回 <code>{"action":…}</code>）</td><td>—</td><td>训练产物挂进网页对战（详见 <a href="#custom">自定义模型</a>）</td></tr>
+<tr><td><b>⑦ 记录与积分</b></td><td><code>GET /api/v1/matches</code> · <code>GET /api/v1/ratings/{game}</code></td><td>Bearer（用户）</td><td>保留的只读对局记录与 ELO 积分榜；新对局由 v2 创建</td></tr>
+<tr><td><b>⑧ 外部 bot</b></td><td>对局座位的 <code>{"type":"bot","url":"…"}</code></td><td>创建对局需登录</td><td>服务端向 bot 地址发送状态并读取动作，详见<a href="#custom">外部 bot 协议</a></td></tr>
 </table>
 <p><b>闭环</b>：② OpenEnv 采样 + 客户端训练 → SDK 导出 ONNX → ⑥ 上传托管 → ⑤/⑦ PvE、PvP、模型对战 → ⑦ 积分。② 与 ⑤ 背后是<b>同一套游戏引擎</b>（同一 <code>step_state</code>），当前游戏在固定版本、相同 seed/options 与动作输入下重建相同轨迹。</p>
 
@@ -335,7 +335,7 @@ weekly → 最近 7 天聚合：按胜场降序（同胜场看局数、再看本
 需登录；scope 非法 422；未知游戏 404</code></pre>
 
 <h2 id="social">身份与社交 v1.0-b（资料/好友/聊天/通知）</h2>
-<p>好友 v1 按用户名<b>直接互加</b>（无需同意，双向可见）；房间聊天与通知均为<b>轮询 + SQLite 落库</b>（D14，刷新不丢，无 WebSocket）。</p>
+<p>好友按用户名<b>直接互加</b>（无需同意，双向可见）；通知通过 HTTP 轮询并保存在 SQLite。对局聊天属于 v2 对局事件流，仅对座位上的玩家可见。</p>
 
 <h3><span class="get">GET</span> /api/v1/profile · <span class="put">PUT</span> /api/v1/profile</h3>
 <pre><code>→ {"profile":{"id","username","nickname","avatar","signature","role","created_at"}}
@@ -347,131 +347,62 @@ POST   /api/v1/friends            {"username":"…"}  → 互加 + 给对方发 
 DELETE /api/v1/friends/{id}       → 双向删除
 错误：404 用户不存在 · 400 不能加自己 / 已经是好友</code></pre>
 
-<h3>房间聊天（对局双方，D14 轮询）</h3>
-<pre><code>GET  /api/v1/{game}/play/sessions/{id}/chat?since=0
-     → {"messages":[{"id","nickname","text","created_at"}],"next_since":N}
-POST /api/v1/{game}/play/sessions/{id}/chat  {"text":"…"}   # 1-500 字符
-仅对局双方可用（403）；since 游标只取新消息；历史落库，刷新不丢</code></pre>
+<h3>对局聊天（v2，座位玩家可见）</h3>
+<pre><code>POST /api/v2/matches/{id}/chat  {"text":"…"}   # 1–500 字符
+→ {"message":{"id":1,"from":1,"name":"alice","seat":"p0","text":"…","at":…,"tick":0}}</code></pre>
+<p>读取通过对局快照的 <code>chat</code> 和 SSE 的 <code>chat</code> 事件；观战者收不到消息。消息保存在运行中的对局内存中供重连，不写入封存回放。</p>
 
 <h3>通知（铃铛轮询）</h3>
 <pre><code>GET  /api/v1/notifications         → {"items":[…],"unread":N}
 GET  /api/v1/notifications/unread  → {"unread":N}
 POST /api/v1/notifications/read    → 全部标记已读</code></pre>
 
-<h2 id="play">游玩会话 v1（服务器权威对局）</h2>
-<p>服务器持有<b>权威状态</b>；客户端提交动作推进 tick。<b>创建会话需要登录账号</b>（游客只能观战/看榜）。PvE 单人（可带服务端对手）；PvP 双人（邀请码、双方提交后推进、超时判负）。会话存于内存，空闲 30 分钟回收；每用户并发 8 局。提交动作可带 <code>expected_tick</code>，与服务端当前 tick 不一致返回 409（防网络重试双推进）。</p>
+<h2 id="play">统一对局 v2（服务器权威）</h2>
+<p>练习、PvP、模型对战、观战和回放共用 Match。创建和操作需要登录；客户端提交命令，服务端维护状态并通过 SSE 发布变化。旧 v1 游玩会话、房间、匹配和回放 API 已删除，旧客户端不会自动兼容。</p>
+<p>对局创建时即获得字符串 <code>id</code> 并写入记录；主要状态为 <code>waiting</code>、<code>active</code>、<code>finished</code>、<code>cancelled</code>、<code>aborted</code>。进行中的状态与匹配队列在内存中；结束后的帧由服务端封存。</p>
 
-<h3><span class="post">POST</span> /api/v1/{game}/play/sessions <span class="badge">创建/加入</span></h3>
-<pre><code>PvE: {"kind":"pve","seed":42?,"opponent":{…}?,"controller":{…}?}
-     opponent:   {"type":"ai","strategy":"light_rush"}          # 内置策略（microrts）
-              |  {"type":"model","model_id":N}                  # 托管模型（登录）
-              |  {"type":"external_bot","url":"https://…"}      # 你自己的 bot
-     controller: {"type":"model","model_id":N}                  # 模型代打（snake/tetris，登录）
-PvP: {"kind":"pvp"}                     # 创建房间（兼容默认 ranked + private）
-     {"kind":"pvp","mode":"ranked|casual","visibility":"public|private"}?
-     {"kind":"pvp","invite":"OD2ZX4"}   # 凭邀请码加入
-→ {"session":{…},"invite":"OD2ZX4"?,"side":"p0|p1"?}</code></pre>
-<p><code>session</code> 字段：<code>id, game, kind, status, tick, state, winner, cause, opponent, invite, mode, visibility, players, p1_joined</code>。<code>status</code>：<code>waiting</code>（PvP 等对手）→ <code>active</code> → <code>finished</code>（另有 <code>abandoned/cancelled</code>）。</p>
+<h3><span class="post">POST</span> /api/v2/matches <span class="badge">创建对局</span></h3>
+<pre><code>Authorization: Bearer &lt;token&gt;
+{"game":"snake","mode":"practice","visibility":"unlisted","settings":{"seed":42}}
+→ 201 MatchView，例如 {"id":"a1b2c3d4e5f6","game":"snake","status":"active",…}</code></pre>
+<p>请求字段为 <code>game</code>、可选 <code>seats</code>、<code>mode</code>、<code>visibility</code> 和 <code>settings.seed</code>。省略座位时使用游戏默认座位与对手；指定 seed 的练习局可复现，但不会进入分数榜。</p>
+<p>MatchView 包含 <code>id/game/version/kind/mode/visibility/status/result/seats/you/tick/frame/to_act/deadline_at/frames/chat/seq</code>。<code>you.seat</code> 是当前玩家的座位；观战者为 null。<code>id</code> 贯穿对局与回放，不是 v1 数字记录 id。</p>
 
-<h3>房间 v1.0-a（公开大厅 / 邀请码双轨，06 M1）</h3>
-<p>房间 = <code>waiting</code> 状态 PvP 会话的正式化。公开房间出现在大厅列表，任何人可加入；私有房间凭邀请码加入。<code>ranked</code> 结算 ELO，<code>casual</code> 只落对局记录不计分（D10）。房间与队列均为内存态，服务重启即失效。</p>
+<h3>PvP 房间与快速匹配</h3>
+<pre><code>POST /api/v2/matches
+{"game":"microrts","mode":"casual","visibility":"private",
+ "seats":[{"seat":"p0","occupant":"me","controller":{"type":"human"}},
+          {"seat":"p1","occupant":null,"controller":{"type":"human"}}]}
+→ 201 MatchView，房主可从 invite 取得邀请码
 
-<h3><span class="get">GET</span> /api/v1/{game}/play/rooms <span class="badge">公开房间列表</span></h3>
-<pre><code>GET /api/v1/microrts/play/rooms[?mode=ranked|casual]    # 需登录
-→ {"rooms":[{"id":…,"game":…,"mode":"ranked|casual","visibility":"public",
-           "invite":"OD2ZX4","host":"房主","host_id":N,"created_at":…},…]}
-仅返回等待中的公开房间；5 秒轮询由前端驱动。</code></pre>
+GET  /api/v2/matches?game=microrts&amp;mode=casual      # 等待中的公开房间
+POST /api/v2/matches/{id}/seats/p1/join {"invite":"OD2ZX4"}  # 私有房需要邀请码
+GET  /api/v2/me/matches                             # 我的 waiting / active 对局</code></pre>
+<p>人类对战支持 <code>casual</code> 和 <code>ranked</code>；公开房间进入大厅，<code>unlisted</code> 凭链接读取，<code>private</code> 只允许座位玩家读取并要求邀请码入座。对局结束后，ranked 人类对战结算 ELO。重连使用同一对局 id、快照与事件流。</p>
+<pre><code>POST   /api/v2/microrts/matchmaking/queue {"mode":"ranked"}
+GET    /api/v2/microrts/matchmaking/status
+DELETE /api/v2/microrts/matchmaking/queue
+状态示例：{"queued":false,"matched":true,"mode":"ranked",
+           "position":null,"wait_seconds":2,"match_id":"a1b2c3d4e5f6"}</code></pre>
+<p>匹配成功后使用 <code>match_id</code> 打开对局；成功结果可重复读取，队列在服务重启后失效。</p>
 
-<h3><span class="post">POST</span> /api/v1/{game}/play/rooms <span class="badge">创建房间</span></h3>
-<pre><code>{"mode":"casual|ranked","visibility":"public|private","settings":{"seed":N}?}
-默认 casual + public（D10：练习局不计分）；private 房间仅凭邀请码加入。
-→ {"session":{…},"invite":"OD2ZX4","side":"p0"}</code></pre>
+<h3>快照、动作与事件流</h3>
+<pre><code>GET  /api/v2/matches/{id}                    # MatchView 快照
+POST /api/v2/matches/{id}/actions {"tick":0,"action":1}
+→ 202 {"accepted":true,"seq":3}
+GET  /api/v2/matches/{id}/stream             # text/event-stream
+POST /api/v2/matches/{id}/controller {"seat":"p0","controller":{"type":"human"}}
+POST /api/v2/matches/{id}/resign
+POST /api/v2/matches/{id}/rematch</code></pre>
+<p><code>tick</code> 为必填，必须与当前快照一致；同一座位在该 tick 尚未结算时再次提交会覆盖待提交动作，过期 tick 返回 409。202 只确认接收，最新状态从快照或 SSE 获取。练习局可切换自己座位的控制器；已结束的人类 PvP 可由双方发起并接受再来一局。</p>
+<p>SSE 首次连接返回快照，后续发送 <code>tick</code>、<code>seat</code>、<code>status</code>、<code>chat</code> 等事件；可用 <code>Last-Event-ID</code> 或 <code>?since=</code> 续传，日志不足时重新发送快照。服务端定期发送 <code>ping</code>；聊天内容仅发给座位玩家。</p>
 
-<h3><span class="post">POST</span> /api/v1/{game}/play/rooms/{id}/join <span class="badge">加入房间</span></h3>
-<pre><code>{"invite":"OD2ZX4"?}    # public 免码；private 必须携带正确邀请码（不区分大小写）
-→ {"session":{…},"invite":"OD2ZX4","side":"p1"}
-错误：404 房间不存在 · 400 邀请码无效 / 不能加入自己的房间 / 房间已满或已开始</code></pre>
-
-<h3>快速匹配 v1.0-a（队列 + ELO band 撮合，06 §5 / D9）</h3>
-<p>每个 (game, mode) 一个内存队列；ranked 与 casual 分开撮合。ranked 撮合 band 初始 ±100，每 5 秒 +100 至 ±400，等满 60 秒任意对手；casual 不分差直接撮合。撮合即自动创建内部 PvP 房间（private，不进大厅列表，p0=先入队者），双方轮询 status 拿到房间 id 后进入对局。同账号不互配；同一对未打完不重复撮合；每人每游戏最多 1 个队列（重复入队=更新模式）；10 分钟无结果自动移出；队列内存态，重启失效。</p>
-
-<h3><span class="post">POST</span> /api/v1/{game}/matchmaking/queue <span class="badge">进入队列</span></h3>
-<pre><code>{"mode":"ranked|casual"}   # 需登录；重复入队=更新参数
-→ {"queued":true,"matched":false,"mode":"ranked","position":1,"wait_seconds":0,"session_id":null}
-已撮合时直接返回 {"queued":false,"matched":true,"session_id":"…"}</code></pre>
-
-<h3><span class="get">GET</span> /api/v1/{game}/matchmaking/status <span class="badge">排队状态（2s 轮询）</span></h3>
-<pre><code>→ {"queued":true|false,"matched":true|false,"mode":…,"position":N,"wait_seconds":N,"session_id":…}
-matched=true 时 session_id 为撮合出的房间 id（读取即消费该条目）；未排队时 queued=false</code></pre>
-
-<h3><span class="delete">DELETE</span> /api/v1/{game}/matchmaking/queue <span class="badge">取消排队</span></h3>
-<pre><code>→ {"queued":false}    # 即时生效</code></pre>
-
-<h3>断线重连 + 再来一局 v1.0-a（06 §7 U5/U7）</h3>
-<p>刷新/断线后凭 <code>GET /api/v1/play/active</code> 找回自己未完成的 waiting/active 会话（含阵营 side、tick）；对局结束后的 <code>rematch</code> 复制 settings/mode/visibility、<b>互换 p0/p1</b> 并开新房间把双方带回（幂等：双方各点一次进同一个新房间）。断线期间由现有超时策略兜底（60s 空过、连续 5 次判负）。</p>
-
-<h3><span class="get">GET</span> /api/v1/play/active <span class="badge">我的进行中对局</span></h3>
-<pre><code>→ {"sessions":[{"id":…,"game":…,"kind":"pvp","status":"waiting|active",
-              "tick":N,"side":"p0|p1","mode":…,"visibility":…,"players":[…],…},…]}
-需登录；只含自己是参与者的会话（PvP 或本人 PvE），按最近活动排序</code></pre>
-
-<h3><span class="post">POST</span> /api/v1/{game}/play/sessions/{id}/rematch <span class="badge">再来一局</span></h3>
-<pre><code>→ {"session":{…新房间…},"invite":"…","side":"p0|p1"}
-仅 finished 对局可用（400）；仅原双方可用（403）；先后手互换；
-对已开过的 rematch 重复调用返回同一个新房间</code></pre>
-
-<h3>观战 + 回放 v1.0-a（06 §7 U6 / 07 M4）</h3>
-<p><b>观战</b>：<code>GET /api/v1/{game}/play/sessions/{id}</code> 非玩家返回 <code>side:null</code>（只读）。公开房间的对局与快速匹配撮合的对局任何人可围观；<b>私有房间仅双方可读</b>（403）。前端观战页 <code>/watch/{game}/{sessionId}</code> 2s 轮询、只读棋盘 + 双方提交指示。</p>
-<p><b>回放</b>：对局记录保存 <code>game_version</code>、<code>seed</code>、<code>options</code> 与 <code>moves</code>。回放器通过 OpenEnv 按原版本和初始化参数 reset，在同一 WS 连接逐条 step；渲染使用会话 <code>environment.schemas/meta</code>，完成/错误/取消均关闭连接。与 play 共用现有 EnvAdapter；分享链接 <code>/watch/match/{id}</code> 任何人可直接打开。缺版本、seed 或原包的历史记录不可用最新版猜测重建。</p>
-
-<h3><span class="get">GET</span> /api/v1/matches/{id}/replay <span class="badge">对局回放（公开只读）</span></h3>
-<pre><code>→ {"replay":{"schema_version":1,"match_id":N,"game":…,"game_version":"1.0.0",
-             "players":[{user_id,name,side}],"result":{winner,cause,damage,mode},
-             "seed":N,"options":{},"moves":[
-             {"tick":0,"action":{"p0":[…],"p1":[…]},"opponent":null},…]}}
-无需登录；仅 finished 对局（PvE / PvP / model_vs_model）；旧记录可能缺版本或 seed</code></pre>
-
-<h3><span class="get">GET</span> /api/v1/{game}/play/sessions/{sid} <span class="badge">查询/轮询</span></h3>
-<p>返回当前状态；PvP 下触发服务端超时策略（见下）。非玩家可读（观战视角 <code>side:null</code>）。</p>
-
-<h3><span class="post">POST</span> /api/v1/{game}/play/sessions/{sid}/actions <span class="badge">提交动作 → 推进 tick</span></h3>
-<pre><code>{"actions": 0|1|2|3}                          # snake/tetris
-{"actions": [[unit_id, cmd, dir?, type?], …]}  # microrts
-{"actions": null}                              # 仅模型代打会话（服务器自己算）
-{"actions": 1, "expected_tick": 7}             # 可选：乐观并发；不匹配 409（刷新后重试）
-
-PvE 响应: {"state":{…},"tick":N,"done":false,"winner":null,"cause":null,
-          "reward":0.0,"status":"active"}
-PvP 响应: {"state":{…},"tick":N,"done":false,"advanced":false,
-          "waiting_for":"p1","status":"active"}
-          # advanced=true 表示双方指令到齐、本 tick 已推进</code></pre>
-
-<h3>PvE 流程</h3>
-<ol>
-<li><code>POST play/sessions {kind:"pve", opponent:{"type":"ai","strategy":"light_rush"}}</code>（microrts；snake/tetris 不传 opponent）</li>
-<li>循环：读 <code>state</code> → 决策 → <code>POST actions</code> → 拿新 state（服务端对手自动同步行动）</li>
-<li><code>done=true</code> → 结束，响应带权威 <code>match_id</code>；用 <code>POST /api/{game}/scores {"match_id":…}</code> 领榜（分数由服务端从该对局读取，客户端不能自报）</li>
-</ol>
-
-<h3>PvP 流程（人 vs 人）</h3>
-<ol>
-<li>玩家 A：<code>POST play/sessions {kind:"pvp"}</code> → <code>invite</code>（6 位邀请码），<code>side="p0"</code>（蓝方），status=<code>waiting</code></li>
-<li>玩家 B：<code>POST play/sessions {kind:"pvp","invite":"OD2ZX4"}</code> → status=<code>active</code>，<code>side="p1"</code>（红方）</li>
-<li>双方各自攒指令并 <code>POST actions</code>；一方提交后响应 <code>waiting_for</code> 指对方</li>
-<li><b>双方都提交后</b>服务器推进一 tick（<code>advanced:true</code>）；用 <code>GET</code> 轮询观察对手提交与推进</li>
-<li>每步限时 60 秒：超时自动空过（<code>players[].submitted</code> 与 tick 会变化），连续 5 次超时判负；<code>POST leave</code> 认输 → 对方胜</li>
-<li>结束后自动落库为对局记录；<b>ranked</b> 按 <b>ELO（K=32，起始 1200）</b>结算双方积分，<b>casual</b> 只落记录不计分（D10）</li>
-<li>大厅流程：<code>GET play/rooms</code> 看公开房间 → <code>POST play/rooms/{id}/join</code> 直接加入（private 房凭邀请码）；同账号不可加入自己的房间</li>
-</ol>
-
-<h3><span class="post">POST</span> /api/v1/{game}/play/sessions/{sid}/leave <span class="badge">认输/退出</span></h3>
-<pre><code>PvP 认输 → {"status":"finished","winner":1}   # 对方获胜；等待中的房间被创建者取消
-PvE 退出 → {"status":"abandoned"}</code></pre>
-
-<h3><span class="get">GET</span> /api/v1/{game}/play/sessions/{sid}/replay <span class="badge">回放</span></h3>
-<pre><code>{"id":…,"game":…,"kind":…,"seed":…,"players":[…],"opponent":…,
- "moves":[{"tick":0,"action":…,"opponent":…},…],"result":{…}}</code></pre>
-<p>回放是<b>每 tick 动作日志</b>，可用环境 API 离线重放（同 seed 同轨迹）。</p>
+<h3>观战与回放</h3>
+<p>前端统一使用 <code>/m/{id}</code> 展示对局、观战与回放。公开或 unlisted 对局可凭 id 读取；private 对局仅玩家可读取。进行中的帧按观看者视角裁剪，终局后按权限读取封存帧。</p>
+<pre><code>GET /api/v2/matches/{id}/frames?from=0&amp;limit=1
+→ {"frames":[{"tick":0,"frame":{…},"actions":null,"events":[]}],
+   "next":1,"total":2}</code></pre>
+<p><code>from</code> 是帧数组偏移而非 tick；<code>limit</code> 为 1–500，最后一页 <code>next=null</code>。浏览器直接展示封存帧，不通过 OpenEnv 重新执行动作；无法重建或未封存的旧记录可能没有帧。</p>
 
 <h2 id="models">模型托管 v1（ONNX）</h2>
 <p>只接受 <b>ONNX</b>（onnxruntime CPU 推理）。上传时服务端校验：≤20MB、能加载、输入/输出 shape 匹配该游戏的标准契约；每游戏最多保留 5 个活跃模型。SDK 的 <code>export_onnx</code> 保证导出即合规。</p>
@@ -498,20 +429,23 @@ Authorization: Bearer &lt;token&gt;
 <p>服务端跑 3 局（snake/tetris 记分；microrts 打内置 AI 记胜率），返回指标：</p>
 <pre><code>→ {"model_id":3,"metrics":{"games":3,"avg_score":…,"avg_length":…,
    "scores":[…],"win_rate":0.33}}   # win_rate 仅 microrts</code></pre>
-<div class="note">托管模型的三种用途：① PvE 对手 <code>{"type":"model","model_id":N}</code>；② 模型代打（controller）；③ 模型 vs 模型对战（下节）。模型之间、模型与内置 AI 均可异步对战。</div>
+<div class="note">托管模型可作为练习局对手、自己座位的代打控制器，或模型对战的座位。模型必须属于该游戏；自己座位的代打模型必须由自己拥有。</div>
 
-<h2 id="matches">对战与积分 v1</h2>
+<h2 id="matches">模型对战、记录与积分</h2>
 
-<h3><span class="post">POST</span> /api/v1/matches <span class="badge">创建模型对战（异步）</span></h3>
-<pre><code>{"game":"microrts","model_a":3,"model_b":5}          # 双方都是托管模型
-{"game":"microrts","model_a":3,"model_b":"ai:light_rush"}  # vs 内置 AI
-→ {"match_id":7}</code></pre>
-<p>对战在服务端后台线程运行（最多 1500 tick），上限 8 局并发。可用 <code>GET /api/v1/matches/{id}</code> 轮询：<code>status: queued → running → finished|failed</code>；结果与<b>逐 tick 回放</b>存库。</p>
+<h3><span class="post">POST</span> /api/v2/matches <span class="badge">创建模型对战</span></h3>
+<pre><code>{"game":"microrts","seats":[
+  {"seat":"p0","occupant":null,"controller":{"type":"model","model_id":3}},
+  {"seat":"p1","occupant":null,"controller":{"type":"ai","strategy":"light_rush"}}
+]}
+→ 201 MatchView，id 为对局 uid</code></pre>
+<p>支持两个模型座位，或模型对内置 AI；无人占座时至少一个模型属于创建者。通过 <code>GET /api/v2/matches/{id}</code> 或 SSE 观察结果，通过 <code>/frames</code> 获取帧回放。</p>
 
 <h3><span class="get">GET</span> /api/v1/matches <span class="badge">我的对局</span></h3>
-<p>你的 PvP 对局 + 你参与/拥有的模型对战，最新在前。每项含 <code>kind(pvp|model_vs_model), players, models, status, result{winner,cause,damage,tick}, replay</code>。</p>
+<p>保留的只读记录列表，按参与玩家筛选，可包含进行中的对局；新记录包含通往舞台的 <code>uid</code>。进行中的可重连对局可另用 <code>GET /api/v2/me/matches</code> 查询。</p>
 
-<h3><span class="get">GET</span> /api/v1/matches/{id} <span class="badge">对局详情（含回放）</span></h3>
+<h3><span class="get">GET</span> /api/v1/matches/{id} <span class="badge">只读记录详情</span></h3>
+<p>按数字记录 id 查询并返回 <code>{"match":…}</code>；新对局与可迁移的历史记录带有字符串 <code>uid</code>。对局状态和帧回放请使用 v2 接口。</p>
 
 <h3><span class="get">GET</span> /api/v1/ratings/{game} <span class="badge">ELO 积分榜</span></h3>
 <pre><code>→ {"items":[{"user_id":1,"rating":1216.0,"games":1,"wins":1,"name":"bob"},…]}</code></pre>
@@ -541,8 +475,8 @@ Authorization: Bearer &lt;token&gt;
 # v1.0-e 起附加运行指标：活跃会话数（内存）与 SQLite 数据库字节数</code></pre>
 
 <h2 id="env">环境交互（唯一官方 OpenEnv 入口）</h2>
-<p>环境基址为 <code>/api/openenv/{game}</code>，目录 <code>GET /api/games</code> 提供 <code>openenv_url</code> 与 <code>schema_url</code>。仅使用官方 <code>openenv==0.4.1</code> 栈；旧环境 API 已删除，不保留别名、重定向或兼容服务器。账号、play、模型、排行榜和回放记录等平台业务 API 不变。完整权威说明见仓库 <code>docs/api/openenv.md</code>。</p>
-<p><b>WS 一连接一实例</b>：官方 <code>GenericEnvClient.reset/step/state</code> 在同一连接操作服务端环境。训练算法与模型可在调用方运行，但环境计算在后端，不是完全离线训练。底层仍是现有 <code>EnvAdapter</code> 和沙箱游戏包；不表示任意复杂外部游戏引擎已接入。</p>
+<p>远程环境基址为 <code>/api/openenv/{game}</code>，目录 <code>GET /api/games</code> 提供 <code>openenv_url</code> 与 <code>schema_url</code>。远程交互使用官方 <code>openenv==0.4.1</code> 栈；旧环境 API 已删除。平台对局使用独立的 v2 Match API。完整环境说明见仓库 <code>docs/api/openenv.md</code>。</p>
+<p><b>WS 一连接一实例</b>：官方 <code>GenericEnvClient.reset/step/state</code> 在同一连接操作服务端环境。远程环境计算在后端；SDK 的 <code>LocalVecEnv</code> 则可下载游戏包后在本地进程运行。两者使用相同游戏包规则。</p>
 <div class="warn"><b>生命周期与容量</b>：当前每游戏最多 64 个并发环境，所有客户端共享，不是吞吐保证。关闭连接销毁会话。超时或断线后不要盲目重发 step（先前动作可能已执行）；当前无断线续局，重连后显式 reset。成功、错误和取消路径均应关闭连接。</div>
 
 <h2 id="openenv">官方 OpenEnv 协议（0.4.1）</h2>
@@ -579,12 +513,12 @@ Authorization: Bearer &lt;token&gt;
 {"type":"state","state":{…},"metadata":{…}}</code></pre>
 <p>reset 的 <code>observation.metadata.environment</code> 包含 <code>game/name/actions/obs_modes/schemas/meta/version/max_concurrent_envs</code> 等描述，step 不重复整份描述。完整状态是当前快照型适配器的能力，不要求所有未来游戏的策略观测公开内部状态。环境本身在 done 后不会自动 reset。</p>
 
-<h3>state 与网页/历史回放</h3>
+<h3>state 与对局回放</h3>
 <pre><code>{"type":"state"}
 → {"type":"state","data":{"episode_id":null,"step_count":0,"game_state":null,
     "environment":{"game":"tetris","version":"1.0.0","max_concurrent_envs":64,…}}}</code></pre>
-<p>reset 前 <code>game_state=null</code>，environment 描述当前版本；reset 后是本局状态与固定版本的 <code>environment.schemas/meta</code>。HTTP <code>/schema</code> 仅描述当前发布版本，不可替代历史包渲染配置。网页读取会话动作描述；游客预览 reset 获取初始状态后关闭连接，不创建 play Session。</p>
-<p>回放记录仍来自平台业务 API；重建使用原 <code>version + seed + options</code> reset，再在同一连接逐条 step 记录动作，从返回状态渲染，最后关闭连接。确定性保证仅适用于固定版本、相同初始化参数与动作输入的当前游戏引擎，不扩展为任意外部引擎的 seed/快照支持。</p>
+<p>reset 前 <code>game_state=null</code>，environment 描述当前版本；reset 后是本局状态与固定版本的 <code>environment.schemas/meta</code>。HTTP <code>/schema</code> 仅描述当前发布版本，不可替代历史包配置。</p>
+<p>平台对局回放直接读取 <code>GET /api/v2/matches/{id}/frames</code> 的服务端帧，不需要连接 OpenEnv 逐步重算。旧记录迁移可能需要原游戏版本和初始化数据；无法迁移的记录可能没有帧。</p>
 
 <h3>官方 Python 客户端（自动管理 WS 连接）</h3>
 <pre><code>from openenv.core import GenericEnvClient
@@ -622,7 +556,7 @@ POST /api/openenv/snake/mcp  {"jsonrpc":"2.0","id":4,"method":"openenv/session/c
 <tr><td><code>body</code></td><td>蛇身格子 <code>[[x,y],…]</code>，<code>body[0]</code> 是蛇头，至少 2 格</td></tr>
 <tr><td><code>direction</code></td><td>绝对朝向 0=上 1=下 2=左 3=右</td></tr>
 <tr><td><code>food</code></td><td><code>[x,y]</code> 或 <code>null</code></td></tr>
-<tr><td><code>score / tick / seed / done / cause / grid</code></td><td>cause: <code>wall|self|win|null</code></td></tr>
+<tr><td><code>score / tick / _seed / done / cause / grid</code></td><td>cause: <code>wall|self|win|null</code>；进行中的对局视角会隐藏私有字段</td></tr>
 </table>
 <ul>
 <li><b>动作（相对朝向）</b>：<code>0</code>=左转 <code>1</code>=直行 <code>2</code>=右转（180° 掉头不存在）</li>
@@ -638,7 +572,7 @@ POST /api/openenv/snake/mcp  {"jsonrpc":"2.0","id":4,"method":"openenv/session/c
 <tr><td><code>piece</code></td><td><code>{"id":0..6,"rot":0..3,"x":int,"y":int}</code>，当前活动方块</td></tr>
 <tr><td><code>next</code></td><td>下一块 id（0=I 1=O 2=T 3=S 4=Z 5=J 6=L）</td></tr>
 <tr><td><code>bag / bag_pos / bag_idx</code></td><td>7-bag 状态（当前适配器的状态快照；OpenEnv 会话在服务端持有局面）</td></tr>
-<tr><td><code>score / lines / tick / seed / done / cause / grid</code></td><td>cause: <code>lockout|null</code></td></tr>
+<tr><td><code>score / lines / tick / _seed / done / cause / grid</code></td><td>cause: <code>lockout|null</code>；进行中的对局视角会隐藏私有字段</td></tr>
 </table>
 <ul>
 <li><b>动作</b>：<code>0</code>=左移 <code>1</code>=右移 <code>2</code>=顺时针旋转（带基础踢墙） <code>3</code>=硬降</li>
@@ -680,8 +614,8 @@ cmd: 0=wait 1=move(dir) 2=harvest(dir) 3=return(dir) 4=build(dir,type)
 <h2 id="ai">内置 AI 演示</h2>
 <div class="warn"><b>限流</b>：游客/IP <b>30 req/s</b>，登录用户（Bearer）<b>60 req/s</b>，超限返回 429。</div>
 <h3><span class="post">POST</span> /api/snake/ai/action</h3>
-<p>训练好的 DQN（rotwin R=10，1334 维观测，MLP 1334→128→64→3）。请求沿用原 snake 服务的最小载荷：</p>
-<pre><code>{"body": [[10,10],[9,10],[8,10]], "direction": 3, "food": [15,10]}
+<p>训练好的 DQN（rotwin R=10，1334 维观测，MLP 1334→128→64→3）。请求使用统一的 <code>state</code> 载荷：</p>
+<pre><code>{"state":{"body":[[10,10],[9,10],[8,10]],"direction":3,"food":[15,10]}}
 → {"action": 1, "action_name": "straight", "q": [94.2, 97.3, 94.7]}</code></pre>
 <h3><span class="post">POST</span> /api/tetris/ai/action</h3>
 <p>启发式基线（Dellacherie 一子搜索：聚合高度/空洞/不平整度/消行）。请求传完整 state：</p>
@@ -696,11 +630,7 @@ cmd: 0=wait 1=move(dir) 2=harvest(dir) 3=return(dir) 4=build(dir,type)
 <h3><span class="get">GET</span> /api/{game}/scores?limit=N</h3>
 <pre><code>{"items":[{"rank":1,"name":"…","score":42,"mode":"human","created_at":1.7e9}]}</code></pre>
 <p>按分数降序、同分先提交者在前；<code>mode</code> ∈ <code>human|ai|custom</code>；limit 1..100。</p>
-<h3><span class="post">POST</span> /api/{game}/scores <span class="badge">凭对局领分</span></h3>
-<pre><code>{"match_id": 123, "name": "…"?}   # 需登录；分数由服务端从这场 PvE 对局读取
-→ {"id":1,"rank":7,"name":"…","score":42,"mode":"human","match_id":123}
-# 别人的对局 403；对局不存在 404；同一场对局重复领 400；未登录 401</code></pre>
-<div class="warn"><b>限流</b>：提交按身份分档——游客/IP <b>1 req/s</b>，登录用户（Bearer）<b>5 req/s</b>，超限返回 429；GET 不限流。</div>
+<p>成绩由服务端在合格的练习局结束后自动写入。主动认输、指定 seed、缺少分数或分数超出游戏声明范围的对局不会上榜；客户端没有提交成绩的 POST 接口。</p>
 
 <h2 id="ugc">用户上传游戏 UGC v1.1（docs/design/10-11）</h2>
 <p>注册用户可上传自己的游戏包（<code>game.yaml</code> + <code>__init__.py</code> 暴露 <code>get_adapter()</code>），经<b>沙箱冒烟 + AST 静态扫描 + 管理员审核</b>后公开发布，自动获得官方 OpenEnv 环境入口、网页游玩、榜单、PvP 房间/快速匹配/ELO（声明 <code>pvp.enabled</code> 时）、观战回放等全部平台能力。包只允许使用平台 venv 已有库（标准库白名单 + numpy）。</p>
@@ -715,6 +645,7 @@ cmd: 0=wait 1=move(dir) 2=harvest(dir) 3=return(dir) 4=build(dir,type)
 <tr><td><code>DELETE /api/v1/ugc/games/{id}</code></td><td>用户（作者）</td><td>删除草稿</td></tr>
 <tr><td><code>GET /api/v1/admin/ugc</code> · <code>?status=all</code></td><td>admin</td><td>审核队列 / 全部游戏</td></tr>
 <tr><td><code>POST /api/v1/admin/ugc/{id}/approve|reject|ban|unban|pause|resume|rollback|retest</code></td><td>admin</td><td>审核通过/驳回（附意见）/下架/恢复/暂停/恢复/回滚/重测</td></tr>
+<tr><td><code>GET /api/v1/games/{slug}/package</code> · <code>GET /api/v1/games/{slug}/package/{version}.zip</code></td><td>公开</td><td>本地训练用的版本清单与游戏包；UGC 需作者开放本地训练</td></tr>
 </table>
 <pre><code># game.yaml 渲染声明（通用 JSON 棋盘渲染器据此绘制 state.board / state.units）
 board: { width: 10, height: 10, palette: { empty: { glyph: "·", color: "#e4e4e7" } } }
@@ -724,22 +655,30 @@ ai_strategies: ["binary"]                                             # 可选�
 contract: { in_shape: [1,64], out_shape: [1,4] }                      # 可选，ONNX 托管契约</code></pre>
 <p>已公开游戏的元数据出现在 <code>GET /api/games</code>（<code>author</code>/<code>pvp_enabled</code>/<code>meta</code>；13 G3 起不再有 <code>source</code> 内置/UGC 之分，官方包 author=「官方」）；前端入口：<code>/games/{slug}</code> 单机、<code>/games/{slug}/pvp</code> 对战、<code>/ugc</code> 作者工作台。</p>
 
-<h2 id="custom">自定义模型协议（🔌 挂自己的 bot）</h2>
-<p>游戏页面的「🔌 自定义模型」模式：填一个你自己的 <b>HTTPS</b> 服务 URL，游戏每步 POST 状态过去，按返回的动作走。你的模型在<b>你自己机器</b>上跑，平台只提供环境。也支持作为游玩会话的 <code>external_bot</code> 对手。</p>
+<h2 id="custom">外部 bot 控制器</h2>
+<p>创建对局时可为座位指定 <code>{"type":"bot","url":"http://…"}</code>。由<b>平台服务端</b>向该地址发送状态并读取动作；地址必须能从服务端访问，接受 HTTP 或 HTTPS。</p>
 <table>
 <tr><th>方向</th><th>载荷</th></tr>
-<tr><td>游戏 → 模型</td><td><code>{"state": {…完整 state…}}</code>（三个游戏通用）</td></tr>
-<tr><td>模型 → 游戏（任选）</td><td>snake/tetris：<code>{"action": 0|1|2|3}</code> / 裸数字；microrts：<code>{"action": [[unit_id, cmd, dir?, type?], …]}</code> / 裸指令列表</td></tr>
+<tr><td>平台 → bot</td><td><code>{"state": {…},"seat":"p0"}</code>；<code>seat</code> 随控制的座位变化</td></tr>
+<tr><td>bot → 平台</td><td>JSON <code>{"action":…}</code>，也可直接返回游戏动作；具体结构由游戏定义</td></tr>
 </table>
-<div class="warn"><b>硬性要求</b>：模型 URL 必须 <b>HTTPS</b>（页面是 https，浏览器拦截 mixed content；本地可用 <code>cloudflared tunnel --url http://localhost:8080</code>）+ 返回 <code>Access-Control-Allow-Origin: *</code> CORS 头。</div>
-<div class="note">对比托管 ONNX：自定义 bot 逻辑任意（可读全量 state）但不参与托管模型对战；托管模型按标准契约校验、可在 PvE/PvP/模型对战中使用。</div>
+<p>这不是浏览器直接调用：bot 响应不依赖浏览器 CORS。可通过 <code>SessionClient.start_pve(opponent={"type":"bot","url":"…"})</code> 为双座练习局指定 bot 对手。</p>
 
 <h2 id="sdk">Python SDK（训练 → 导出 → 上传 → 对战）</h2>
-<pre><code>cd sdk && pip install -e .        # openenv==0.4.1 / numpy / requests / gymnasium（torch 仅训练需要）
+<pre><code>pip install -e sdk        # 从仓库根目录安装；训练或导出按需安装 torch 等依赖
 </code></pre>
 
-<h3>客户端训练（OpenEnv + Gymnasium 包装）</h3>
-<p>向量包装每槽管理一条独立 OpenEnv 连接，不再使用单 HTTP 请求批量推进，不承诺旧批处理吞吐。seed 推进、自动重开和终止观测由 SDK 管理；每游戏 64 个环境额度由全部客户端共享。</p>
+<h3>本地游戏包训练</h3>
+<p><code>LocalVecEnv</code> 首次使用时下载指定游戏包并校验 sha256，之后在本地进程执行环境。官方包可直接使用；UGC 包需作者开放本地训练，使用者还需显式设置 <code>trust_remote_code=True</code>。</p>
+<pre><code>from gameplatform import LocalVecEnv
+
+with LocalVecEnv(game="snake", n=4, obs_mode="rotwin",
+                 base_url="http://127.0.0.1:8080") as envs:
+    obs = envs.reset(seed=42)
+    obs, rewards, dones, infos = envs.step([1] * 4)</code></pre>
+
+<h3>远程训练（OpenEnv + Gymnasium 包装）</h3>
+<p><code>RemoteVecEnv</code> 每槽管理一条独立 OpenEnv 连接，不使用单 HTTP 请求批量推进。seed 推进、自动重开和终止观测由 SDK 管理；每游戏 64 个远程环境额度由全部客户端共享。</p>
 <pre><code>from gameplatform import RemoteVecEnv            # 每个环境独立连接
 envs = RemoteVecEnv(game="tetris", n=16, obs_mode="grid",
                     base_url="http://127.0.0.1:8080")
@@ -764,24 +703,25 @@ export_onnx(my_net, game="snake", path="my_dqn.onnx")   # 校验 shape，通过�
 <h3>上传 + 模型对战（PlatformClient）</h3>
 <pre><code>from gameplatform import PlatformClient
 c = PlatformClient(base_url="https://games.cree1p.com")
-c.register("alice", "password123")                 # 或 c.login(...) / c.guest()
-model = c.upload_model("my_dqn.onnx", game="snake", name="我的DQN")
+c.login("alice", "password123")                    # 或先注册账号；游客不能上传模型
+model = c.upload_model("microrts_policy.onnx", game="microrts", name="我的策略")
 c.eval_model(model["id"])                          # 服务端 3 局标准评估
-mid = c.create_match(game="microrts", model_a=3, model_b="ai:light_rush")
-m = c.wait_match(mid)                              # 轮询直到 finished
+uid = c.create_match(game="microrts", model_a=model["id"], model_b="ai:light_rush")
+m = c.wait_match(uid)                              # 轮询直到终态
+replay = c.match_replay(uid)                       # 返回 {id, frames, total}
 print(c.ratings("microrts"))                       # ELO 积分榜</code></pre>
 
-<h3>全量 API 玩（SessionClient，服务器权威会话）</h3>
+<h3>SessionClient（v2 对局客户端）</h3>
 <pre><code>from gameplatform import PlatformClient
-s = PlatformClient().session("microrts")           # 或 PlatformClient(token=…)
-s.start_pve(opponent="worker_rush")                # PvE：内置 AI / 托管模型 / 外部 bot
-while not s.done:
-    s.act(build_commands(s.state))                 # 你本地任意决策逻辑
+c = PlatformClient(base_url="https://games.cree1p.com")
+c.login("alice", "password123")
+s = c.session("snake").start_pve(seed=42)
+view = s.act(1)                                    # 动作是整数；返回最新 MatchView
+print(view["tick"], view["status"], s.replay()["total"])
 
-p = PlatformClient(token=…).session("microrts").create_pvp()
-print("邀请码:", p.invite)                          # 朋友 join_pvp(p.invite)
-while not p.done:
-    p.act(my_commands); p.poll()                   # 双方提交后推进；poll 观察对手</code></pre>
+p = c.session("microrts").create_pvp(visibility="private")
+print("对局 id:", p.id, "邀请码:", p.invite)
+# 另一账号：other.session("microrts").join_pvp(p.id, invite=p.invite)</code></pre>
 
 <p style="margin-top:48px;color:var(--muted)">Stream · <a href="/">游戏大厅</a> · <a href="/models">模型托管</a> · <a href="/docs">Swagger UI</a></p>
   </main>
@@ -811,20 +751,20 @@ while not p.done:
     },
     {
       label: "游玩",
-      items: [{ id: "play", title: "游玩会话 v1" }],
+      items: [{ id: "play", title: "统一对局 v2" }],
     },
     {
       label: "模型",
       items: [
         { id: "models", title: "模型托管 v1" },
-        { id: "custom", title: "自定义模型协议" },
+        { id: "custom", title: "外部 bot 控制器" },
         { id: "sdk", title: "Python SDK" },
       ],
     },
     {
       label: "对战积分",
       items: [
-        { id: "matches", title: "对战与积分 v1" },
+        { id: "matches", title: "模型对战、记录与积分" },
         { id: "scores", title: "排行榜" },
       ],
     },

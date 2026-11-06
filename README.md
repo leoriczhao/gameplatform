@@ -170,7 +170,8 @@ with GenericEnvClient(base_url="http://127.0.0.1:8080/api/openenv/tetris").sync(
 目录 `GET /api/games` 提供 `openenv_url`/`schema_url`。连续 reset/step 必须在同一
 WS 连接内；HTTP reset/step/state 各使用临时实例，不支持跨请求续局或状态注入。
 断线/超时不要盲目重发 step，重连后显式 reset。当前每游戏共享 64 个并发环境，
-不是性能承诺。历史回放按原 version + seed + options reset，再逐条 step 动作。
+不是性能承诺。对局回放直接读取 v2 `/api/v2/matches/{uid}/frames` 封存帧；
+旧记录可能因迁移数据不足而没有可用帧。
 游戏运行层仍为现有 `EnvAdapter`，不意味着任意复杂外部游戏已支持。
 
 SDK 保留 Gymnasium 包装；向量环境每槽一连接，不再单 HTTP 批量推进，
@@ -192,9 +193,9 @@ with gym.make("platform-tetris-v0", obs_mode="grid") as env:
 
 # 对局客户端（SDK 1.0 / v2 matches；旧 v1 play API 已在 M4 删除）
 from gameplatform import PlatformClient
-c = PlatformClient(base_url="https://games.cree1p.com"); c.login("alice", "secret")
+c = PlatformClient(base_url="https://games.cree1p.com"); c.login("alice", "password123")
 m = c.session("snake")
-view = m.start_pve()                      # practice + unlisted 练习局
-view = m.act([1])                         # 提交后轮询到下一次轮到我 / 终局
-print(view["tick"], view["status"], m.replay()[:1])
+m.start_pve()                             # practice + unlisted 练习局
+view = m.act(1)                           # 提交后轮询到下一次轮到我 / 终局
+print(view["tick"], view["status"], m.replay()["frames"][:1])
 ```

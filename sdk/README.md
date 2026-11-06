@@ -17,12 +17,12 @@ pip install -e sdk
 from gameplatform import PlatformClient
 
 c = PlatformClient(base_url="https://games.cree1p.com")
-c.login("alice", "secret")                  # 或 c.register(...) / c.guest()
+c.login("alice", "password123")             # 或先注册；模型操作需要登录
 
-model = c.upload_model("my_dqn.onnx", game="snake", name="我的DQN")
+model = c.upload_model("microrts_policy.onnx", game="microrts", name="我的策略")
 c.eval_model(model["id"])
 
-# 模型对战：两个 model 座位，kind/mode 由服务端推导；返回对局 uid
+# 模型对战：模型对内置 AI，kind/mode 由服务端推导；返回对局 uid
 uid = c.create_match(game="microrts", model_a=model["id"], model_b="ai:light_rush")
 view = c.wait_match(uid)                    # 轮询 v2 快照直到终局
 print(view["status"], view["result"])
@@ -36,7 +36,7 @@ print(replay["total"], replay["frames"][0]["tick"])
 
 | 0.x | 1.0 |
 |---|---|
-| `create_match(game, model_a, model_b)` 返回 int match_id | 返回对局 **uid**（str）；POST `/api/v2/matches`，p0/p1 均为 model 座位 |
+| `create_match(game, model_a, model_b)` 返回 int match_id | 返回对局 **uid**（str）；POST `/api/v2/matches`，p1 可为模型或 AI |
 | `get_match(match_id)` 返回 v1 match | `get_match(uid)` 返回 v2 **MatchView** 快照 |
 | `wait_match(match_id)` 轮询 v1 status | `wait_match(uid)` 轮询 v2 快照 status（finished/cancelled/aborted 为终局） |
 | `match_replay(match_id)` 返回 v1 replay | `match_replay(uid)` 返回 `{id, frames, total}`，用 `/frames` 分页 |
@@ -48,9 +48,9 @@ print(replay["total"], replay["frames"][0]["tick"])
 | `active_games()` | `my_live_matches()` → `[MatchView]`（`GET /api/v2/me/matches`） |
 | `chat_send` / `chat_since`（v1 会话聊天） | `send_chat(uid, text)`；读取走 `MatchView["chat"]` / SSE `chat` 事件 |
 
-`my_matches()` **保留 v1 历史列表**（`GET /api/v1/matches`，平台保留该只读接口）：
-它只返回已结束对局的历史记录，不含进行中/可重连的对局。进行中的对局用
-`my_live_matches()`（v2 `GET /api/v2/me/matches`）。
+`my_matches()` 使用保留的只读记录列表（`GET /api/v1/matches`），按参与玩家筛选，
+也可能包含进行中的对局。需要获取可重连的进行中对局时，使用 `my_live_matches()`
+（v2 `GET /api/v2/me/matches`）。
 
 ### SessionClient：v2 对局客户端（语义大改）
 
