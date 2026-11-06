@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 import ugc_runner
-import ugc_static
+from gamekernel import scan as ugc_static
 
 
 @pytest.mark.parametrize("operation", ["read", "write", "chmod", "socket", "spawn"])
@@ -95,7 +95,7 @@ def get_adapter(): return Game()
 
 
 def test_smoke_worker_is_reaped(tmp_path, monkeypatch):
-    import ugc
+    import package_pipeline
     workers = []
     original = ugc_runner.GameWorker
     def track(*args, **kwargs):
@@ -110,7 +110,7 @@ def test_smoke_worker_is_reaped(tmp_path, monkeypatch):
     def validate_state(self, state): pass
 def get_adapter(): return Game()
 ''')
-    result = ugc._smoke("smoke-reaping", tmp_path, {})
+    result = package_pipeline.smoke("smoke-reaping", tmp_path, {})
     assert result["ok"], result
     assert workers and all(w._stopped and proc.poll() is not None for w, proc in workers)
 

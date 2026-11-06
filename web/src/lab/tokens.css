@@ -2917,3 +2917,84 @@ html[data-lab-theme="light"] body {
   padding-top: 2px;
 }
 
+/* ---- Environment 试玩 tab：内嵌 v2 对局舞台（设计 17 §7.7） ----
+   只追加在文件末尾，不改既有规则；容器 min-width:0 + 窄屏兜底滚动，
+   避免舞台网格在环境页的内容列里撑出横向溢出。 */
+.envp-stage {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.envp-stage__bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 9px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--lab-line);
+  background: var(--lab-surface);
+}
+.envp-stage__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--lab-font-display);
+  font-size: 13px;
+  font-weight: 650;
+}
+.envp-stage__id {
+  font-family: var(--lab-font-mono);
+  font-size: 8px;
+  letter-spacing: 0.03em;
+  color: var(--lab-text-3);
+}
+.envp-stage__hint {
+  font-size: 10.5px;
+  color: var(--lab-text-3);
+}
+.envp-stage__actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.envp-stage__embed {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+}
+.envp-stage__embed .stage {
+  min-width: 0;
+  max-width: 100%;
+}
+/* 内嵌时舞台棋盘不需要全屏高度，收一点避免环境页过长 */
+.envp-stage__embed .stage-board {
+  min-height: 300px;
+}
+.envp-stage__intro {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 780px;
+}
+.envp-stage__facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  font-family: var(--lab-font-mono);
+  font-size: 9px;
+  letter-spacing: 0.03em;
+  color: var(--lab-text-3);
+}
+@media (max-width: 767px) {
+  .envp-stage__actions {
+    margin-left: 0;
+  }
+  .envp-stage__embed .stage-board {
+    min-height: 240px;
+  }
+}
+

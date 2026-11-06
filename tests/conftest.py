@@ -15,5 +15,7 @@ from pathlib import Path
 _tmp = tempfile.TemporaryDirectory()
 os.environ["SCORES_DB"] = str(Path(_tmp.name) / "scores.db")
 os.environ["MODELS_DIR"] = str(Path(_tmp.name) / "models")
+# SDK 本地训练的游戏包缓存（18）：测试与其启动的子进程都不写用户的 ~/.cache
+os.environ["GAMEPLATFORM_CACHE"] = str(Path(_tmp.name) / "sdk-cache")
 os.environ.setdefault("ADMIN_USERNAME", "seedadmin")
 os.environ.setdefault("ADMIN_PASSWORD", "adminsecret1")

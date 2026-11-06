@@ -23,7 +23,7 @@ def _state_with(board, piece, nid, bag=None):
     return {
         "board": board, "piece": piece, "next": nid, "bag": bag,
         "bag_pos": bag.index(nid), "bag_idx": 0, "score": 0, "lines": 0,
-        "tick": 0, "seed": 0, "done": False, "cause": None, "grid": [10, 20],
+        "tick": 0, "_seed": 0, "done": False, "cause": None, "grid": [10, 20],
     }
 
 
@@ -169,7 +169,7 @@ def test_validate_state_rejections():
     bad_rot = {**good, "piece": {**good["piece"], "rot": 4}}
     bad_next = {**good, "next": 9}
     bad_bag = {**good, "bag": [0, 1, 2, 3, 4, 5, 5]}
-    bad_seed = {**good, "seed": "1"}
+    bad_seed = {**good, "_seed": "1"}
     bad_cause = {**good, "cause": "boom"}
     for label, state in [("board", bad_board), ("piece", bad_piece),
                          ("rot", bad_rot), ("next", bad_next),

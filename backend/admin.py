@@ -4,7 +4,7 @@
 - Ban = users.status='banned' (auth.login_user already rejects non-active)
 - Model takedown = models.status='banned' (every consumer checks active)
 - DAU proxy: distinct users with xp_events in the last 24h (every game
-  finish awards XP) + in-memory active sessions
+  finish awards XP) + in-memory live v2 matches
 """
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 
 import auth
-import sessions
+import match_engine
 
 SCORES_DB = Path(os.environ.get("SCORES_DB", "/data/scores.db"))
 DAY = 24 * 3600
@@ -254,6 +254,13 @@ def list_matches_all(limit: int = 50) -> list[dict]:
             "created_at": r[7], "finished_at": r[8],
         })
     return out
+def _active_match_count() -> int:
+    """Live v2 matches right now (admin dashboard metric, design 17)."""
+    with match_engine._LIVE_LOCK:
+        live = list(match_engine.LIVE.values())
+    return sum(1 for m in live if m.status in ("waiting", "active"))
+
+
 def dashboard() -> dict:
     # ensure sibling schemas exist before aggregating (idempotent)
     import growth
@@ -291,7 +298,7 @@ def dashboard() -> dict:
         "users_total": int(users),
         "users_new_24h": int(new_users),
         "dau_24h": int(dau),
-        "active_sessions": sessions.active_session_count(),
+        "active_sessions": _active_match_count(),
         "matches_total": int(matches_total),
         "matches_24h": int(matches_day),
         "models_active": int(models),

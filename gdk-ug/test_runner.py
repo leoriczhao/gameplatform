@@ -1,34 +1,46 @@
 """GDK-UG 本地测试器（作者侧自测，不依赖平台后端）。
 
 用法: python gdk-ug/test_runner.py <游戏目录> [steps] [seed]
-检查: 元数据基本一致 · get_adapter() 契约完整 · 同 seed 幂等 · 渲染约定 ·
-      N 步连续推进不崩 · done 语义 · PvP 复合动作 · AI 对手（如声明）。
-完整严格校验以平台上传时的 ugc_pack 为准。
+检查: game.yaml 严格校验 · 静态扫描 · get_adapter() 契约完整 · 同 seed 幂等 ·
+      渲染约定 · N 步连续推进不崩 · done 语义 · PvP 复合动作 · AI 对手（如声明）。
+game.yaml 校验、静态扫描与包加载直接调用 gamekernel（docs/design/19），与平台
+上传时是同一份代码（需先 pip install -e sdk）。zip 层检查（体积、文件类型、
+资源魔数）仍只在上传时进行。
 """
 from __future__ import annotations
 
-import importlib.util
 import json
 import sys
 from pathlib import Path
 
 import yaml
+from gamekernel import manifest, scan
+from gamekernel.loader import PackageError, load_package
 
 
 def load_game(game_dir: Path):
-    meta_raw = (game_dir / "game.yaml").read_text(encoding="utf-8")
-    meta = yaml.safe_load(meta_raw)
-    # 与平台 worker 同款加载：目录进 sys.path + 按包加载（支持多文件/相对导入）
-    sys.path.insert(0, str(game_dir))
-    spec = importlib.util.spec_from_file_location(
-        "ugc_game", game_dir / "__init__.py",
-        submodule_search_locations=[str(game_dir)])
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = mod   # 相对导入（from . import …）解析必需
-    spec.loader.exec_module(mod)
-    if not callable(getattr(mod, "get_adapter", None)):
-        raise SystemExit("FAIL: __init__.py 必须暴露 get_adapter()")
-    return meta, mod.get_adapter()
+    meta = yaml.safe_load((game_dir / "game.yaml").read_text(encoding="utf-8"))
+    try:
+        return meta, load_package(game_dir)   # 与平台 worker 同一个加载器
+    except PackageError as e:
+        raise SystemExit(f"FAIL: {e}")
+
+
+def strict_checks(game_dir: Path, meta) -> list[tuple[str, bool]]:
+    """平台上传时的同款校验：game.yaml 严格 schema + 静态扫描。"""
+    out = []
+    files = [p.relative_to(game_dir).as_posix() for p in game_dir.rglob("*")
+             if p.is_file() and "__pycache__" not in p.parts]
+    try:
+        manifest.validate_meta(meta, files=files)
+        out.append(("game.yaml 通过平台严格校验", True))
+    except manifest.ManifestError as e:
+        out.append((f"game.yaml 校验失败：{e}", False))
+    report = scan.scan_dir(game_dir)
+    out.append(("静态扫描通过" if report["ok"] else "静态扫描未通过："
+                + "; ".join(f"{v['file']}:{v['line']} {v['detail']}"
+                            for v in report["violations"][:3]), report["ok"]))
+    return out
 
 
 def same(a, b) -> bool:
@@ -45,6 +57,7 @@ def main() -> int:
     checks: list[tuple[str, bool]] = []
 
     meta, adapter = load_game(game_dir)
+    checks.extend(strict_checks(game_dir, meta))
     checks.append(("元数据: slug/title/board 齐全",
                    all(k in meta for k in ("slug", "title", "board"))))
     for method in ("new_state", "step_state", "validate_state", "validate_action"):

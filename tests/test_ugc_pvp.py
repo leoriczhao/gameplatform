@@ -1,6 +1,7 @@
-"""UGC PvP capability (11 P4, D21): published pvp-enabled games get
-rooms + matchmaking + ELO through the same surfaces as microrts; games that
-don't declare pvp keep rejecting PvP."""
+"""UGC PvP capability (11 P4, D21): published pvp-enabled games get v2
+rooms + v2 matchmaking + ELO through the same surfaces as microrts; games that
+don't declare pvp keep rejecting PvP. The v1 play/room session API is gone
+(M4 / design 17 §9)."""
 import io
 import os
 import sys
@@ -23,8 +24,20 @@ from fastapi.testclient import TestClient  # noqa: E402
 import admin as admin_store  # noqa: E402
 import main  # noqa: E402
 import registry  # noqa: E402
+import ugc_runner  # noqa: E402
 
 client = TestClient(main.app)
+
+
+@pytest.fixture(autouse=True)
+def _restore_registry():
+    """Published test games never leak into other test modules."""
+    before = set(registry.GAMES)
+    yield
+    for slug in set(registry.GAMES) - before:
+        registry.unregister(slug)
+        ugc_runner.drop_worker(slug)
+
 
 RPS_DIR = ROOT / "gdk-ug" / "examples" / "rock_paper_scissors"
 
@@ -52,8 +65,20 @@ def _h(u):
     return {"Authorization": f"Bearer {u['token']}"}
 
 
-def _publish(slug: str, admin: dict, author: dict) -> int:
-    data = _rps_zip(slug)
+def _rps_two_seat_no_pvp_zip(slug: str) -> bytes:
+    """Two seats declared, but no pvp declaration: humans may never fight."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        yaml = (RPS_DIR / "game.yaml").read_text()
+        yaml = yaml.replace("slug: rock-paper-scissors", f"slug: {slug}")
+        yaml = yaml.split("\npvp:")[0] + "\nseats: 2\n"
+        zf.writestr("game.yaml", yaml)
+        zf.writestr("__init__.py", (RPS_DIR / "__init__.py").read_text())
+    return buf.getvalue()
+
+
+def _publish(slug: str, admin: dict, author: dict, data: bytes | None = None) -> int:
+    data = data if data is not None else _rps_zip(slug)
     r = client.post("/api/v1/ugc/games",
                     files={"file": (f"{slug}.zip", data, "application/zip")},
                     data={"changelog": "init"}, headers=_h(author))
@@ -64,6 +89,16 @@ def _publish(slug: str, admin: dict, author: dict) -> int:
     assert client.post(f"/api/v1/admin/ugc/{gid}/approve",
                        headers=_h(admin)).status_code == 200
     return gid
+
+
+def _room(a: dict, slug: str, **extra) -> dict:
+    r = client.post("/api/v2/matches", headers=_h(a), json={
+        "game": slug,
+        "seats": [{"seat": "p0", "occupant": "me", "controller": {"type": "human"}},
+                  {"seat": "p1", "occupant": None, "controller": {"type": "human"}}],
+        **extra})
+    assert r.status_code == 201, r.text
+    return r.json()
 
 
 @pytest.fixture
@@ -78,11 +113,17 @@ def admin(monkeypatch):
     return r.json()
 
 
-def test_non_pvp_game_rejects_pvp():
+def test_non_pvp_game_rejects_pvp(admin):
     A = _user("ugcpvp0")
-    r = client.post("/api/v1/snake/play/sessions",
-                    json={"kind": "pvp"}, headers=_h(A))
-    assert r.status_code == 400
+    slug = "rps-nopvp"
+    _publish(slug, admin, A, data=_rps_two_seat_no_pvp_zip(slug))
+    assert slug in registry.GAMES and registry.GAMES[slug].pvp_enabled is False
+    r = client.post("/api/v2/matches", headers=_h(A), json={
+        "game": slug,
+        "seats": [{"seat": "p0", "occupant": "me", "controller": {"type": "human"}},
+                  {"seat": "p1", "occupant": None, "controller": {"type": "human"}}]})
+    assert r.status_code == 400, r.text
+    assert r.json()["detail"]["code"] == "no_pvp"
     assert "不支持" in r.text
 
 
@@ -93,26 +134,24 @@ def test_ugc_pvp_room_full_game(admin):
     _publish(slug, admin, A)
     assert slug in registry.GAMES
     assert registry.GAMES[slug].pvp_enabled is True
-    # 创建房间（p0 = A），B 加入
-    r = client.post(f"/api/v1/{slug}/play/rooms", json={},
-                    headers=_h(A))
-    assert r.status_code == 200, r.text
-    sid = r.json()["session"]["id"]
-    # 房间公开列表里能看到（public 默认，等待中）
-    rooms = client.get(f"/api/v1/{slug}/play/rooms",
+    # 创建 v2 房间（p0 = A），公开列表可见；B 加入后对局开始
+    room = _room(A, slug)
+    sid = room["id"]
+    assert room["status"] == "waiting" and room["kind"] == "pvp"
+    rooms = client.get(f"/api/v2/matches?game={slug}",
                        headers=_h(A)).json()["rooms"]
     assert any(rm["id"] == sid for rm in rooms)
-    r = client.post(f"/api/v1/{slug}/play/rooms/{sid}/join", json={},
+    r = client.post(f"/api/v2/matches/{sid}/seats/p1/join", json={},
                     headers=_h(B))
     assert r.status_code == 200, r.text
-    # 双方各提交一个 choice 动作 -> 推进一局
-    r = client.post(f"/api/v1/{slug}/play/sessions/{sid}/actions",
-                    json={"actions": 0}, headers=_h(A))
-    assert r.status_code == 200 and r.json()["advanced"] is False
-    r = client.post(f"/api/v1/{slug}/play/sessions/{sid}/actions",
-                    json={"actions": 1}, headers=_h(B))
-    assert r.status_code == 200, r.text
-    assert r.json()["advanced"] is True
+    assert r.json()["status"] == "active" and r.json()["you"]["seat"] == "p1"
+    assert client.get(f"/api/v2/matches/{sid}", headers=_h(A)).json()["kind"] == "pvp"
+    # 认输收尾，对局记录落库（ELO 只在 ranked；casual 同样记录）
+    assert client.post(f"/api/v2/matches/{sid}/resign",
+                       headers=_h(B)).status_code == 200
+    rec = client.get(f"/api/v1/matches", headers=_h(A)).json()["matches"]
+    row = next(m for m in rec if m.get("uid") == sid)
+    assert row["kind"] == "pvp" and row["status"] == "finished"
 
 
 def test_ugc_pvp_matchmaking(admin):
@@ -120,18 +159,20 @@ def test_ugc_pvp_matchmaking(admin):
     B = _user("ugcpvp4")
     slug = "rps-pvp-mm"
     _publish(slug, admin, A)
-    # 快速匹配：B 入队即撮合（ELO 都在带内）
-    r = client.post(f"/api/v1/{slug}/matchmaking/queue",
+    # 快速匹配：B 入队即撮合（ELO 都在带内），返回 v2 match_id
+    r = client.post(f"/api/v2/{slug}/matchmaking/queue",
                     json={"mode": "casual"}, headers=_h(A))
     assert r.status_code == 200 and r.json()["queued"] is True
-    r = client.post(f"/api/v1/{slug}/matchmaking/queue",
+    r = client.post(f"/api/v2/{slug}/matchmaking/queue",
                     json={"mode": "casual"}, headers=_h(B))
     assert r.status_code == 200 and r.json()["matched"] is True
-    sid = r.json()["session_id"]
-    # 匹配到的房间可读、双方可玩（resign 收尾）
-    r = client.get(f"/api/v1/{slug}/play/sessions/{sid}",
-                   headers={"Authorization": f"Bearer {A['token']}"})
-    assert r.status_code == 200 and r.json()["session"]["p1_joined"] is True
-    client.post(f"/api/v1/{slug}/play/sessions/{sid}/leave", json={},
-                headers=_h(A))
-    client.delete(f"/api/v1/{slug}/matchmaking/queue", headers=_h(B))
+    mid = r.json()["match_id"]
+    # 匹配到的对局可读、双方已入座
+    view = client.get(f"/api/v2/matches/{mid}", headers=_h(A)).json()
+    assert view["status"] == "active" and view["kind"] == "pvp"
+    assert [s["occupant"]["user_id"] for s in view["seats"]] == \
+        [A["user"]["id"], B["user"]["id"]]
+    assert client.get(f"/api/v2/{slug}/matchmaking/status",
+                      headers=_h(A)).json()["match_id"] == mid
+    client.post(f"/api/v2/matches/{mid}/resign", headers=_h(A))
+    client.delete(f"/api/v2/{slug}/matchmaking/queue", headers=_h(B))

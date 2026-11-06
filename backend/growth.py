@@ -2,7 +2,8 @@
 
 Numbers: docs/design/08-成长与赛事数值.md（XP 表、等级曲线 50·n·(n-1)）。
 - xp_events: append-only ledger; users.xp keeps the cached total
-- rating_history: one row per ELO settlement (for the 走势 sparkline)
+- XP is awarded by subscribing to the match domain's match_finished event
+  (docs/design/19 §5); ELO and its history belong to matches (L2)
 - stats/me + weekly board aggregate the matches table
 """
 from __future__ import annotations
@@ -12,6 +13,9 @@ import os
 import sqlite3
 import time
 from pathlib import Path
+
+import events
+import matches
 
 SCORES_DB = Path(os.environ.get("SCORES_DB", "/data/scores.db"))
 
@@ -36,13 +40,6 @@ def _db() -> sqlite3.Connection:
         "CREATE INDEX IF NOT EXISTS idx_xp_user ON xp_events(user_id, id)")
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_xp_game_time ON xp_events(game, created_at)")
-    conn.execute(
-        """CREATE TABLE IF NOT EXISTS rating_history (
-               id INTEGER PRIMARY KEY AUTOINCREMENT, game TEXT NOT NULL,
-               user_id INTEGER NOT NULL, rating REAL NOT NULL,
-               created_at REAL NOT NULL)""")
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_rh_game_user ON rating_history(game, user_id, id)")
     return conn
 
 
@@ -99,37 +96,29 @@ def level_progress(xp: int) -> float:
     return min(1.0, max(0.0, (xp - base) / need)) if need else 1.0
 
 
-def award_pvp(sess) -> None:
-    """XP for a finished PvP session (both modes; both players)."""
-    for side, pid in (("p0", sess.p0["id"]), ("p1", sess.p1["id"])):
-        award_xp(pid, sess.game, "pvp_play", XP_PVP_PLAY)
-        if sess.winner is not None and side == f"p{sess.winner}":
-            award_xp(pid, sess.game, "pvp_win", XP_PVP_WIN)
+def _on_match_finished(payload) -> None:
+    """XP is awarded from the v2 settlement payload (design 17 §13)."""
+    game, winner = payload["game"], payload["winner"]
+    if payload["kind"] == "pvp":
+        for p in payload["players"]:
+            award_xp(p["user_id"], game, "pvp_play", XP_PVP_PLAY)
+            if winner == p["seat"]:
+                award_xp(p["user_id"], game, "pvp_win", XP_PVP_WIN)
+    elif payload["kind"] == "pve" and payload["players"]:
+        p = payload["players"][0]
+        award_xp(p["user_id"], game, "pve_finish", XP_PVE_FINISH)
+        if winner == p["seat"]:
+            award_xp(p["user_id"], game, "pve_win", XP_PVE_WIN)
 
 
-def award_pve(sess) -> None:
-    """XP for a finished PvE session (registered users only)."""
-    uid = sess.principal.get("id") if sess.principal else None
-    if not uid:
-        return
-    award_xp(uid, sess.game, "pve_finish", XP_PVE_FINISH)
-    if sess.winner == 0:
-        award_xp(uid, sess.game, "pve_win", XP_PVE_WIN)
+def _winner_seat(result: dict) -> str | None:
+    """v2 records store the winning seat ("p1"); a not-yet-migrated legacy row
+    may still carry the integer side index (the M4 migration normalizes it)."""
+    winner = result.get("winner")
+    return winner if winner is None or isinstance(winner, str) else f"p{winner}"
 
 
-# --------------------------------------------------------- rating history
-
-
-def rating_history(game: str, user_id: int, limit: int = HISTORY_LIMIT) -> list[dict]:
-    conn = _db()
-    try:
-        rows = conn.execute(
-            "SELECT rating, created_at FROM rating_history "
-            "WHERE game = ? AND user_id = ? ORDER BY id DESC LIMIT ?",
-            (game, user_id, limit)).fetchall()
-    finally:
-        conn.close()
-    return [{"rating": r[0], "created_at": r[1]} for r in reversed(rows)]
+events.subscribe("match_finished", _on_match_finished)
 # ------------------------------------------------------------- stats / boards
 
 def _my_pvp_matches(user_id: int) -> list[dict]:
@@ -150,8 +139,8 @@ def _my_pvp_matches(user_id: int) -> list[dict]:
         if not sides:
             continue
         side = sides[0].get("side")
-        winner = result.get("winner")
-        won = None if winner is None else (f"p{winner}" == side)
+        winner = _winner_seat(result)
+        won = None if winner is None else (winner == side)
         out.append({"id": r[0], "game": r[1], "side": side,
                     "won": won, "result": result,
                     "created_at": r[4], "finished_at": r[5] or r[4]})
@@ -191,7 +180,7 @@ def stats_for(user_id: int) -> dict:
     finally:
         conn.close()
     for game in per_game:
-        per_game[game]["history"] = rating_history(game, user_id)
+        per_game[game]["history"] = matches.rating_history(game, user_id, HISTORY_LIMIT)
     xp = xp_of(user_id)
     return {
         "xp": xp, "level": level_of(xp),
@@ -243,14 +232,14 @@ def weekly_board(game: str, days: int = 7, limit: int = 50) -> list[dict]:
     for players_raw, result_raw in rows:
         players = json.loads(players_raw or "[]")
         result = json.loads(result_raw) if result_raw else {}
-        winner = result.get("winner")
+        winner = _winner_seat(result)
         for p in players:
             uid = p.get("user_id")
             if uid is None:
                 continue
             a = agg.setdefault(uid, {"games": 0, "wins": 0})
             a["games"] += 1
-            if winner is not None and p.get("side") == f"p{winner}":
+            if winner is not None and p.get("side") == winner:
                 a["wins"] += 1
     for uid, xp in xp_rows:
         agg.setdefault(uid, {"games": 0, "wins": 0})["xp"] = int(xp or 0)

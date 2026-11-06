@@ -32,7 +32,7 @@ def test_new_state_same_seed_reproducible():
         a = adapter.new_state(42)
         b = adapter.new_state(42)
         assert a == b, adapter.game_id
-        assert a["seed"] == 42
+        assert a.get("seed", a.get("_seed")) == 42   # snake/tetris keep it private
         adapter.validate_state(a)  # must not raise
 
 

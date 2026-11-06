@@ -1,7 +1,7 @@
 slug: snake
 title: 贪吃蛇
 description: 20×20 网格贪吃蛇：吃食物 +1 分，撞墙/撞身死亡。相对动作（0=左转 1=直行 2=右转）
-version: 1.1.0
+version: 1.2.0
 board:
   schema: 2
   width: 20

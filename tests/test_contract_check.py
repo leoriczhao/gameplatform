@@ -18,7 +18,7 @@ os.environ["MODELS_DIR"] = str(Path(_tmp.name) / "models")
 from fastapi.testclient import TestClient  # noqa: E402
 
 import admin as admin_store  # noqa: E402
-import contract_check  # noqa: E402
+from gamekernel import manifest as contract_check  # noqa: E402
 import main  # noqa: E402
 import registry  # noqa: E402
 

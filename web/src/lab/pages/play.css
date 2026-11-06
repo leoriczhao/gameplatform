@@ -217,3 +217,17 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* 准备页缩略棋盘：lab-mini 默认按 26px 单元格铺开，会溢出 260px 的侧栏并
+   盖住右侧表单（pointer-events 拦截点击）；这里缩小单元格并裁掉溢出。 */
+.play-mini {
+  width: 100%;
+  max-width: 260px;
+  overflow: hidden;
+  border-radius: 10px;
+  background: var(--lab-bg-deep, #0b0d0c);
+  padding: 10px;
+}
+.play-mini .lab-mini {
+  --cell: 17px;
+}

@@ -3,6 +3,12 @@ slug: my-game            # 全局唯一，小写字母/数字/连字符；创建
 title: 我的游戏
 description: 一句话介绍你的游戏
 version: 0.1.0          # x.y.z
+# 可选：允许玩家下载本包在本地训练（SDK LocalVecEnv，docs/design/18）。
+# 开启后，已发布版本的源码会公开分发；默认关闭，只能通过平台远程环境训练。
+# local_training: true
+# 可选：座位数与对局时钟（docs/design/17 §6、09 §2）。state 中以 "_" 开头的键对局中不下发。
+# seats: 2
+# clock: { kind: turn, move_timeout_s: 30, on_timeout: empty, max_timeouts: 5 }
 
 # 渲染声明（通用棋盘渲染器 v2）：state.board 中的单元格 id 必须都在 palette 里
 board:

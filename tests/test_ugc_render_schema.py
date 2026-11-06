@@ -253,7 +253,7 @@ def test_renderer_declaration():
 
 
 def test_renderer_static_scan():
-    import ugc_static
+    from gamekernel import scan as ugc_static
     assert ugc_static.scan_renderer(
         "globalThis.Renderer = { frame(){} };")["ok"] is True
     for bad in ("fetch('x')", "importScripts('x')", "document.body",

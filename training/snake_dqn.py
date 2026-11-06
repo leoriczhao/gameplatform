@@ -1,9 +1,9 @@
-"""Minimal DQN training for Snake over official OpenEnv WebSocket sessions.
+"""Minimal DQN training for Snake.
 
-Each slot advances synchronously; n slots cost n round trips, not one batched
-request. The game version is pinned and rewards are fixed at each reset.
-Training/evaluation close their sockets on exit; a failed step is not retried.
-Leave one server slot free for evaluation (currently at most 63 training slots).
+--backend local (default) downloads the snake package once and steps it
+in-process with the server's exact dynamics. --backend remote drives official
+OpenEnv WebSocket sessions instead: n slots cost n round trips per step, and one
+server slot must stay free for evaluation (at most 63 training slots).
 
     pip install -r sdk/requirements.txt torch && pip install -e sdk
     python training/snake_dqn.py --base-url https://games.cree1p.com \
@@ -17,7 +17,9 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from gameplatform import RemoteVecEnv
+from gameplatform import LocalVecEnv, RemoteVecEnv
+
+BACKENDS = {"local": LocalVecEnv, "remote": RemoteVecEnv}
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 ACTIONS = 3  # 0=turn left, 1=straight, 2=turn right (relative to heading)
@@ -44,7 +46,10 @@ def dist_to_food(state):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--base-url", default="https://games.cree1p.com")
-    ap.add_argument("--envs", type=int, default=16, help="sequential WS slots; leave one of the server slots free for eval")
+    ap.add_argument("--backend", default="local", choices=sorted(BACKENDS),
+                    help="local: run the downloaded game package in-process; "
+                         "remote: one OpenEnv WS round trip per slot per step")
+    ap.add_argument("--envs", type=int, default=16, help="parallel episodes (remote: WS slots; leave one server slot free for eval)")
     ap.add_argument("--episodes", type=int, default=300, help="total episodes to run")
     ap.add_argument("--obs", default="features", choices=["features", "rotwin", "reach", "grid"])
     ap.add_argument("--reward-food", type=float, default=10.0)
@@ -69,19 +74,19 @@ def main():
     random.seed(args.seed)
     np.random.seed(args.seed)
 
-    with RemoteVecEnv(game="snake", n=args.envs, base_url=args.base_url,
+    with BACKENDS[args.backend](game="snake", n=args.envs, base_url=args.base_url,
                         seed=args.seed, obs_mode=args.obs,
                         rewards={"food": args.reward_food,
                                  "step": args.reward_step,
                                  "death": args.reward_death}) as envs:
-        if args.envs >= envs.max_concurrent_envs:
+        if args.backend == "remote" and args.envs >= envs.max_concurrent_envs:
             raise ValueError("leave one OpenEnv slot free for evaluation: "
                              f"--envs must be below {envs.max_concurrent_envs}")
         train(envs, args)
 
 
 def train(envs, args):
-    print(f"[env] {args.envs} remote envs, obs={args.obs} ({envs.obs_dim} dims), "
+    print(f"[env] {args.envs} {args.backend} envs, obs={args.obs} ({envs.obs_dim} dims), "
           f"device={DEVICE}, url={args.base_url}")
 
     net = MLP(envs.obs_dim).to(DEVICE)
@@ -164,7 +169,7 @@ def evaluate(net, args, episodes=3, greedy=True):
     """Greedy eval on fresh seeds; returns mean score."""
     scores = []
     for _ in range(episodes):
-        with RemoteVecEnv(game="snake", n=1, base_url=args.base_url,
+        with BACKENDS[args.backend](game="snake", n=1, base_url=args.base_url,
                          seed=random.randrange(1 << 30), obs_mode=args.obs, autoreset=False) as e:
             obs = e._last_obs.reshape(1, -1)
             score = 0

@@ -1,5 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import { toast } from "sonner";
 import {
   ArrowRight,
   BookOpen,
@@ -8,15 +9,17 @@ import {
   ExternalLink,
   Play,
   RotateCcw,
+  Swords,
   Terminal,
   Trophy,
   Users,
 } from "lucide-react";
 import { useAuth } from "../../AuthContext.jsx";
-import { useGames, useLeaderboard } from "../api.js";
+import { useGames, useLeaderboard, post } from "../api.js";
 import { useLabAuth } from "../AuthDialog.jsx";
 import { contractRows, FALLBACK_GAMES, normalizeGame } from "../games.js";
 import MiniBoard from "../MiniBoard.jsx";
+import Stage from "../../stage/Stage.jsx";
 import {
   Button,
   Chip,
@@ -374,10 +377,225 @@ function SessionLog() {
   );
 }
 
+// 试玩 tab 创建练习局的失败码 → 人话（docs/design/17 §5.1：错误带机器可读的 code）
+const PLAY_ERROR_TEXT = {
+  bad_controller: "AI 策略不可用，请刷新后再试",
+  bad_seats: "座位配置与服务端不一致，请刷新后再试",
+  bad_mode: "练习模式暂不可用",
+  bad_visibility: "可见性设置不受支持",
+  bad_settings: "开局失败，请稍后再试",
+  unknown_game: "游戏不存在或未公开",
+  too_many_matches: "同时进行的对局过多，请先结束其它对局",
+  login_required: "请先登录",
+};
+
+function playErrorText(error) {
+  if (!error) return "创建试玩对局失败";
+  return (error.code && PLAY_ERROR_TEXT[error.code]) || error.message || "创建试玩对局失败";
+}
+
+/* 试玩 tab：内嵌 v2 舞台（设计 17 §7.7）。
+   旧 PreviewPanel + 假 SessionLog 不再承担试玩，这里只负责
+   「登录 → POST /api/v2/matches 创建 practice 对局 → <Stage uid variant="embedded">」。 */
+function PlayTab({ game, matchId, onMatchIdChange }) {
+  const { user, token, authReady } = useAuth();
+  const { openAuth } = useLabAuth();
+  const loggedIn = Boolean(user) && user.role !== "guest";
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState(null);
+  // 创建请求返回前组件可能已卸载（切 tab / 离开页面），用 ref 挡住 setState
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const meta = game.meta || {};
+  // 座位数与服务端 match_engine.seat_count() 保持一致：game.yaml 的 seats 优先，
+  // 否则只有声明了 PvP / 内置对手的游戏才是 2 座（ai_strategies 不占第二个座位）。
+  const seatCount = useMemo(() => {
+    const declared = Number(meta.seats) || 0;
+    if (declared) return declared;
+    const hasPvp = game.pvp || Boolean(meta.pvp && meta.pvp.enabled)
+      || (Array.isArray(meta.opponents) && meta.opponents.length > 0);
+    return hasPvp ? 2 : 1;
+  }, [game.pvp, meta.seats, meta.pvp, meta.opponents]);
+
+  // AI 策略：opponents 与 ai_strategies 合并，和 match_engine._checked_controller 同口径
+  const strategies = useMemo(() => {
+    const raw = [...(meta.opponents || []), ...(meta.ai_strategies || [])];
+    return [...new Set(raw.map(String).filter(Boolean))];
+  }, [meta.opponents, meta.ai_strategies]);
+
+  // 2 座却没有内置 AI：单机练习凑不齐两个座位，只能去 PvP 大厅约真人
+  const needsHumanOpponent = seatCount >= 2 && strategies.length === 0;
+  const pvpPath = `/games/${game.id}/pvp`;
+
+  const start = async () => {
+    if (!loggedIn) {
+      openAuth("login");
+      return;
+    }
+    if (needsHumanOpponent) return;
+    const seats = [{ seat: "p0", occupant: "me", controller: { type: "human" } }];
+    if (seatCount >= 2) {
+      seats.push({
+        seat: "p1",
+        occupant: null,
+        controller: { type: "ai", strategy: strategies[0] },
+      });
+    }
+    const body = { game: game.id, seats, mode: "practice", visibility: "unlisted" };
+    setCreating(true);
+    setError(null);
+    try {
+      const view = await post("/api/v2/matches", body, token);
+      if (!mountedRef.current) return;
+      if (!view || !view.id) throw new Error("服务端没有返回对局 id");
+      onMatchIdChange(view.id);
+    } catch (e) {
+      if (!mountedRef.current) return;
+      const text = playErrorText(e);
+      setError({ message: text, code: e && e.code });
+      if (e && (e.code === "login_required" || e.status === 401)) {
+        openAuth("login");
+      } else {
+        toast.error(text);
+      }
+    } finally {
+      if (mountedRef.current) setCreating(false);
+    }
+  };
+
+  // 「换一局」先重置 matchId；练习局不会自动结束，顺手认输旧局避免占用并发额度
+  const restart = () => {
+    const oldId = matchId;
+    onMatchIdChange(null);
+    setError(null);
+    if (oldId) {
+      post(`/api/v2/matches/${oldId}/resign`, {}, token).catch(() => {});
+    }
+  };
+
+  if (!authReady) return <Loading label="连接账号服务" />;
+
+  if (!loggedIn) {
+    return (
+      <div className="lab-card">
+        <EmptyState
+          icon={<Play size={17} />}
+          title="登录后开始试玩"
+          desc="试玩使用 v2 对局舞台：创建一局 practice 对局后，内嵌的舞台会实时显示帧、操作与时间线。"
+          action={
+            <Button variant="primary" onClick={() => openAuth("login")}>
+              登录 / 注册
+            </Button>
+          }
+        />
+      </div>
+    );
+  }
+
+  if (matchId) {
+    return (
+      <div className="envp-stage">
+        <div className="envp-stage__bar">
+          <span className="envp-stage__title">
+            <Play size={13} />
+            试玩舞台
+          </span>
+          <span className="envp-stage__id">#{String(matchId).slice(0, 8)}</span>
+          <Pill tone="green" dot>LIVE</Pill>
+          <span className="envp-stage__hint">
+            内嵌舞台与 <span className="lab-mono">/m/{matchId}</span> 是同一局
+          </span>
+          <div className="envp-stage__actions">
+            <Button size="sm" variant="outline" onClick={restart}>
+              <RotateCcw size={12} />
+              换一局
+            </Button>
+            <LinkButton size="sm" variant="primary" href={`/m/${matchId}`}>
+              <ExternalLink size={12} />
+              在舞台页打开
+            </LinkButton>
+          </div>
+        </div>
+        {error ? <ErrorNote error={error} /> : null}
+        <div className="envp-stage__embed">
+          <Stage uid={matchId} variant="embedded" />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="lab-card envp-stage__intro">
+      <div className="lab-card__head">
+        <span className="lab-card__title">PLAYGROUND · V2 STAGE</span>
+        <Pill tone="neutral" dot>PRACTICE</Pill>
+      </div>
+
+      {needsHumanOpponent ? (
+        <>
+          <span className="lab-subtitle" style={{ fontSize: 11.5, lineHeight: 1.7 }}>
+            该环境有 {seatCount} 个座位，但没有内置 AI 策略，单机试玩凑不齐对手。
+            请到 PvP 大厅创建房间或快速匹配，和真人开局。
+          </span>
+          <div className="lab-row" style={{ gap: 8 }}>
+            <LinkButton variant="primary" size="sm" href={pvpPath}>
+              <Swords size={13} />
+              去 PvP 大厅
+            </LinkButton>
+            <span className="lab-mono" style={{ fontSize: 8 }}>{pvpPath}</span>
+          </div>
+        </>
+      ) : (
+        <>
+          <span className="lab-subtitle" style={{ fontSize: 11.5, lineHeight: 1.7 }}>
+            试玩会创建一局 v2 练习对局（practice · unlisted），内嵌的就是
+            <span className="lab-mono"> /m/:id </span>
+            的正式舞台：实时帧、操作、时间线走同一套协议。
+          </span>
+          <div className="envp-stage__facts">
+            <span>座位 {seatCount}</span>
+            <span>对手 {seatCount >= 2 ? `内置 AI · ${strategies[0]}` : "无（单座）"}</span>
+            <span>模式 practice · unlisted</span>
+          </div>
+          {error ? <ErrorNote error={error} /> : null}
+          <div className="lab-row" style={{ gap: 8, flexWrap: "wrap" }}>
+            <Button variant="primary" size="sm" onClick={start} disabled={creating}>
+              <Play size={13} />
+              {creating ? "创建对局…" : "开始试玩"}
+            </Button>
+            {game.pvp ? (
+              <LinkButton variant="outline" size="sm" href={pvpPath}>
+                <Swords size={12} />
+                真人 PvP
+              </LinkButton>
+            ) : null}
+            <LinkButton variant="outline" size="sm" href="/models">
+              <ArrowRight size={12} />
+              去托管模型
+            </LinkButton>
+          </div>
+          <span className="lab-mono" style={{ fontSize: 8 }}>
+            POST /api/v2/matches → Stage uid variant=embedded
+          </span>
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function Environment() {
   const { slug } = useParams();
   const query = useGames();
   const [tab, setTab] = useState("overview");
+  // 试玩的当前对局提升到页面级：切到其它 tab 再回来仍接着同一局（舞台靠快照重连），
+  // 也避免反复切 tab 重复创建练习局；换环境时 gameId 不匹配，自动回到"未开局"。
+  const [playMatch, setPlayMatch] = useState(null);
   const games = (query.data && query.data.games) || [];
   const useFallback = !query.loading && games.length === 0;
   const list = useMemo(
@@ -385,6 +603,8 @@ export default function Environment() {
     [games, useFallback],
   );
   const game = list.find((item) => item.id === slug || item.name === slug);
+  const playMatchId =
+    playMatch && game && playMatch.gameId === game.id ? playMatch.id : null;
 
   if (query.loading) {
     return <Loading label="载入环境" />;
@@ -430,10 +650,10 @@ export default function Environment() {
             <BookOpen size={13} />
             在 SDK 中打开
           </a>
-          <LinkButton variant="primary" size="sm" href={game.pageUrl}>
+          <Button variant="primary" size="sm" onClick={() => setTab("play")}>
             <Play size={13} />
             开始试玩
-          </LinkButton>
+          </Button>
         </div>
       </div>
 
@@ -462,23 +682,11 @@ export default function Environment() {
           </div>
         </div>
       ) : tab === "play" ? (
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.2fr) minmax(0, 0.8fr)", gap: 18, alignItems: "start" }}>
-          <PreviewPanel game={game} />
-          <div className="envp-col">
-            <SessionLog />
-            <div className="lab-card" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              <span className="lab-card__title">怎样验证一个策略</span>
-              <span className="lab-subtitle" style={{ fontSize: 11.5, lineHeight: 1.7 }}>
-                先用 OpenEnv 连接同一套环境采样，再把导出的 ONNX 上传到平台；
-                网页试玩用于人工核对动力学和规则，不替代训练闭环。
-              </span>
-              <LinkButton variant="outline" size="sm" href="/models">
-                <ArrowRight size={12} />
-                去托管模型
-              </LinkButton>
-            </div>
-          </div>
-        </div>
+        <PlayTab
+          game={game}
+          matchId={playMatchId}
+          onMatchIdChange={(id) => setPlayMatch(id ? { gameId: game.id, id } : null)}
+        />
       ) : (
         <div className="envp-layout">
           <div className="envp-col">

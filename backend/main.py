@@ -6,12 +6,14 @@ Serves the React frontend plus a JSON API:
     GET  /api/health         platform health + per-game summary + ops metrics
     /api/openenv/{game}/*    official OpenEnv environment sessions
     GET/POST /api/{game}/... built-in AI, leaderboard per game
-    /api/v1/*                play (sessions/rooms/matchmaking/watch), models,
-                             matches, social, growth, ops/admin (docs/design/00-09)
+    /api/v1/*                models, match history, social, growth, ops/admin
+                             (docs/design/00-09)
+    /api/v2/*                matches (one Match protocol: PvE/PvP/spectate/
+                             replay/model seats) + matchmaking (docs/design/17)
 
 Training algorithms run in the client; environment state is owned by OpenEnv
-sessions. Game engines are shared with platform play and model matches. Sessions,
-rooms, and queues are in-memory (D12); everything else persists in SQLite.
+sessions. Live matches and matchmaking queues are in-memory (D12); everything
+else persists in SQLite.
 """
 from __future__ import annotations
 
@@ -30,12 +32,11 @@ from fastapi.staticfiles import StaticFiles
 from admin_routes import admin_router, router as ops_router
 from auth_routes import router as auth_router
 from game_routes import make_game_router
+from match_api import router as match_v2_router
 from openenv_native import make_openenv_app
 from matches_routes import ratings_router, router as match_router
-from matchmaking_routes import router as matchmaking_router
 from model_routes import router as model_router
 from platform_api import router as platform_router
-from play_routes import router as play_router
 from social_routes import router as social_router
 from stats_routes import router as stats_router
 from ugc_routes import admin_router as ugc_admin_router, router as ugc_router
@@ -50,7 +51,7 @@ logger = logging.getLogger(__name__)
 async def lifespan(app):
     stop = threading.Event()
     threads = [threading.Thread(target=fn, args=(stop,), daemon=True)
-               for fn in (_session_cleaner, _matchmaker_loop)]
+               for fn in (_worker_cleaner, _matchmaker_loop)]
     for thread in threads:
         thread.start()
     try:
@@ -96,20 +97,18 @@ app.add_middleware(
 # v1 auth (accounts) — new platform surface, see docs/design/02
 app.include_router(auth_router)
 
-# v1 play API (server-side sessions), see docs/design/03
-app.include_router(play_router)
-
 # v1 model hosting (ONNX upload/eval), see docs/design/04
 app.include_router(model_router)
 
-# v1 matches (PvP history + model-vs-model), see docs/design/03+04
+# match history + ELO ratings over both v2 records and archived v1 rows
+# (design 17: the projection survives the v1 API removal)
 app.include_router(match_router)
 app.include_router(ratings_router)
 
-# v1 quick matchmaking (06 §5 / v1.0-a M2)
-app.include_router(matchmaking_router)
+# v2 matches (design 17): one Match for PvE/PvP/spectate/replay, commands + SSE
+app.include_router(match_v2_router)
 
-# v1 social (profile/friends/chat/notifications), v1.0-b
+# v1 social (profile/friends/notifications), v1.0-b
 app.include_router(social_router)
 
 # v1 growth/stats/leaderboards, v1.0-c
@@ -140,18 +139,16 @@ def openenv_list_environments() -> list[str]:
 
 app.include_router(_openenv_root)
 
-# periodic session cleanup (abandoned/idle), daemon thread
-import sessions as session_store  # noqa: E402
+# periodic worker cleanup (idle UGC runners), daemon thread
 import matchmaking  # noqa: E402
 
 
-def _session_cleaner(stop) -> None:
+def _worker_cleaner(stop) -> None:
     while not stop.is_set():
         try:
-            session_store.cleanup()
             ugc_store.ugc_runner.idle_cleanup()
         except Exception:
-            logger.exception("session/worker cleanup failed")
+            logger.exception("worker cleanup failed")
         stop.wait(60)
 
 
@@ -227,6 +224,9 @@ try:
     ugc_store.ensure_schema()
     _seed_bundled_games()
     ugc_store.load_published_into_registry()
+    # 进行中的 v2 对局只在内存里（D12）：重启后标记为 aborted，而不是凭空消失
+    import matches as _match_records
+    _match_records.abort_unfinished_v2()
     import platform_api
     platform_api.ready()
 except Exception:
@@ -241,7 +241,7 @@ async def worker_error(_request, exc):
     return JSONResponse(status_code=503, content={"detail": str(exc)})
 
 
-# matchmaking scanner: pairs queued players every SCAN_INTERVAL seconds
+# v2 matchmaking scanner: pairs queued players every SCAN_INTERVAL seconds
 def _matchmaker_loop(stop) -> None:
     while not stop.is_set():
         try:
@@ -323,7 +323,8 @@ async def index_page() -> HTMLResponse:
 
 # SPA routes: every game page is served by the React app (built in Docker);
 # without a build we return a build hint (dev).
-# /watch/* (v1.0-a M4): live spectate + match replay pages
+# /watch/*：旧链接入口。整页刷新由 SPA 返回 index.html；前端 LegacyMatchRedirect
+# 再用保留的 GET /api/v1/matches/{id} 把 v1 记录 id 映射到 /m/:uid。
 @app.get("/watch/match/{mid}", include_in_schema=False)
 @app.get("/watch/match/{mid}/", include_in_schema=False)
 @app.get("/watch/{game}/{sid}", include_in_schema=False)
@@ -350,6 +351,10 @@ async def index_page() -> HTMLResponse:
 @app.get("/environments/{slug}/", include_in_schema=False)
 @app.get("/matches", include_in_schema=False)
 @app.get("/matches/", include_in_schema=False)
+# 17 M3：对局舞台 /m/:id —— 直播 / 观战 / 逐帧回放 / 分享链接的唯一入口。
+# 必须在这里显式声明，否则整页刷新（分享链接直接打开）会落到静态 404。
+@app.get("/m/{slug}", include_in_schema=False)
+@app.get("/m/{slug}/", include_in_schema=False)
 # 14 重构 D27：/arena 破坏性移除（无跳转、无别名，直接 404）
 async def spa_game_page(slug: str | None = None) -> HTMLResponse:
     spa = _spa_index()

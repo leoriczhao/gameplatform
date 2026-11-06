@@ -1,13 +1,14 @@
-"""Social API (v1.0-b): profile, friends, room chat, notifications.
+"""Social API (v1.0-b): profile, friends, notifications.
 
-Design: docs/design/00 模块 B/G + 07 §6-b；D14 聊天轮询+落库。
+Design: docs/design/00 模块 B/G + 07 §6-b. Room chat moved into the v2 match
+event stream in M4 (docs/design/17 §8); social.py stores messages only.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-import sessions
+import match_engine
 import social
 from auth_routes import _principal
 
@@ -30,8 +31,18 @@ class FriendIn(BaseModel):
     username: str = Field(min_length=1, max_length=24, description="对方的用户名")
 
 
-class ChatIn(BaseModel):
-    text: str = Field(min_length=1, max_length=500, description="消息内容")
+def _in_game_user_ids() -> set[int]:
+    """Users seated in a live (waiting/active) v2 match — the 对局中 tag."""
+    with match_engine._LIVE_LOCK:
+        live = list(match_engine.LIVE.values())
+    ids: set[int] = set()
+    for m in live:
+        if m.status not in ("waiting", "active"):
+            continue
+        for seat in m.seats.values():
+            if seat.occupant and seat.occupant.get("user_id") is not None:
+                ids.add(seat.occupant["user_id"])
+    return ids
 
 
 @router.get("/api/v1/profile", summary="我的资料")
@@ -53,9 +64,9 @@ def put_profile(req: ProfileIn, principal: dict = Depends(_principal)) -> dict:
 def friends(principal: dict = Depends(_principal)) -> dict:
     user = _require_user(principal)
     items = social.list_friends(user["id"])
-    online_ids = sessions.online_user_ids()
+    in_game = _in_game_user_ids()
     for f in items:
-        f["in_game"] = f["id"] in online_ids
+        f["in_game"] = f["id"] in in_game
     return {"friends": items}
 
 
@@ -78,37 +89,6 @@ def del_friend(friend_id: int, principal: dict = Depends(_principal)) -> dict:
     return {"removed": True}
 
 
-@router.get("/api/v1/{game}/play/sessions/{sid}/chat", summary="房间聊天（since 游标轮询）")
-def chat_get(game: str, sid: str, since: int = Query(0, ge=0),
-             principal: dict = Depends(_principal)) -> dict:
-    user = _require_user(principal)
-    sess = sessions.get_session(sid)
-    if sess is None or sess.kind != "pvp" or sess.game != game:
-        raise HTTPException(404, "对局不存在")
-    try:
-        sess.side_of(user)
-    except PermissionError:
-        raise HTTPException(403, "仅对局双方可以在房间聊天")
-    msgs, next_since = social.chat_since(sid, since)
-    return {"messages": msgs, "next_since": next_since}
-
-
-@router.post("/api/v1/{game}/play/sessions/{sid}/chat", summary="发送房间聊天")
-def chat_post(game: str, sid: str, req: ChatIn,
-              principal: dict = Depends(_principal)) -> dict:
-    user = _require_user(principal)
-    sess = sessions.get_session(sid)
-    if sess is None or sess.kind != "pvp" or sess.game != game:
-        raise HTTPException(404, "对局不存在")
-    try:
-        sess.side_of(user)
-    except PermissionError:
-        raise HTTPException(403, "仅对局双方可以在房间聊天")
-    try:
-        msg = social.chat_send(sid, user["id"], req.text)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
-    return {"message": msg}
 @router.get("/api/v1/notifications", summary="我的通知列表")
 def notifications(principal: dict = Depends(_principal)) -> dict:
     user = _require_user(principal)

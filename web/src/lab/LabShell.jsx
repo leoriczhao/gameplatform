@@ -39,6 +39,7 @@ function crumbsFor(pathname) {
   if (pathname === "/models") return ["模型"];
   if (pathname === "/matches") return ["对局"];
   if (pathname === "/records") return ["对局"];
+  if (pathname.startsWith("/m/")) return ["对局", "舞台"];
   if (pathname.startsWith("/games/")) {
     const parts = pathname.split("/").filter(Boolean);
     const game = parts[1] ? decodeURIComponent(parts[1]) : "";
@@ -166,7 +167,7 @@ export default function LabShell({ children }) {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [unread, setUnread] = useState(0);
-  const [activeSessions, setActiveSessions] = useState([]);
+  const [activeMatches, setActiveMatches] = useState([]);
   const menuRef = useRef(null);
 
   const crumbs = crumbsFor(location.pathname);
@@ -190,18 +191,20 @@ export default function LabShell({ children }) {
     setMenuOpen(false);
   }, [location.pathname]);
 
+  // 进行中对局横幅：v2 的 GET /api/v2/me/matches 返回 MatchView 列表（docs/design/17 §5.1），
+  // 每项用 m.id 直接进舞台 /m/:id；这里只轮询，不缓存对局状态。
   useEffect(() => {
     if (!loggedIn || !token) {
-      setActiveSessions([]);
+      setActiveMatches([]);
       return undefined;
     }
     let cancelled = false;
     const load = async () => {
       try {
-        const data = await getJson("/api/v1/play/active", token);
-        if (!cancelled) setActiveSessions(data.sessions || []);
+        const data = await getJson("/api/v2/me/matches", token);
+        if (!cancelled) setActiveMatches(data.matches || []);
       } catch (e) {
-        /* keep */
+        /* keep: 瞬时失败不清空横幅 */
       }
     };
     load();
@@ -419,23 +422,20 @@ export default function LabShell({ children }) {
             </a>
           </nav>
 
-          {activeSessions.length > 0 ? (
+          {activeMatches.length > 0 ? (
             <div className="lab-resume" role="status">
               <span className="lab-resume__label">进行中</span>
-              {activeSessions.slice(0, 2).map((sess) => (
-                <Link
-                  key={sess.id}
-                  to={
-                    sess.kind === "pvp"
-                      ? `/games/${sess.game}/pvp?resume=${sess.id}`
-                      : `/games/${sess.game}?resume=${sess.id}`
-                  }
-                  className="lab-resume__item"
-                >
+              {activeMatches.slice(0, 2).map((match) => (
+                <Link key={match.id} to={`/m/${match.id}`} className="lab-resume__item">
                   <Swords size={12} />
                   <span>
-                    {gameLabel(sess.game)} · {sess.kind === "pvp" ? "PvP" : "试玩"} · TICK{" "}
-                    {sess.tick || 0}
+                    {gameLabel(match.game)} ·{" "}
+                    {match.kind === "pvp"
+                      ? "PvP"
+                      : match.kind === "model_vs_model"
+                        ? "模型对战"
+                        : "练习"}{" "}
+                    · {match.status === "waiting" ? "等待对手" : `TICK ${match.tick || 0}`}
                   </span>
                   <span className="lab-resume__go">继续 →</span>
                 </Link>

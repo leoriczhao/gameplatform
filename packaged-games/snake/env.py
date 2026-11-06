@@ -55,7 +55,7 @@ def new_state(seed: int, w: int = GRID_W, h: int = GRID_H) -> dict:
     food, won = spawn_food(body, seed, 0, w, h)
     return {
         "body": body, "direction": INITIAL_DIRECTION, "food": food,
-        "score": 0, "tick": 0, "seed": int(seed), "done": False,
+        "score": 0, "tick": 0, "_seed": int(seed), "done": False,
         "cause": None, "grid": [w, h],
     }
 
@@ -71,14 +71,14 @@ def step_state(state: dict, action: int,
     body = [tuple(p) for p in state["body"]]
     direction = state["direction"]
     food = tuple(state["food"]) if state["food"] else None
-    seed = state["seed"]
+    seed = state["_seed"]
     tick = int(state["tick"]) + 1
     out = {"grid": [w, h]}
 
     if state.get("done"):
         # C++ SnakeEnv::step on a done env returns {reward:0, done:true, ate:false}
         out.update(body=state["body"], direction=direction, food=state["food"],
-                   score=state["score"], tick=state["tick"], seed=seed,
+                   score=state["score"], tick=state["tick"], _seed=seed,
                    done=True, cause=state.get("cause"), reward=0.0, ate=False)
         return out
 
@@ -89,7 +89,7 @@ def step_state(state: dict, action: int,
 
     def fin(nbody, nfood, nscore, done, cause, reward, ate):
         out.update(body=nbody, direction=d, food=nfood,
-                   score=nscore, tick=tick, seed=seed, done=done, cause=cause,
+                   score=nscore, tick=tick, _seed=seed, done=done, cause=cause,
                    reward=reward, ate=ate)
         return out
 
@@ -155,8 +155,8 @@ def validate_state(state: dict, batch: bool = False) -> None:
         raise ValueError("duplicate cells in body")
     if state["direction"] not in DIR_VEC:
         raise ValueError(f"bad direction {state['direction']}")
-    if not isinstance(state["seed"], int):
-        raise ValueError("seed must be an int")
+    if not isinstance(state["_seed"], int):
+        raise ValueError("_seed must be an int")
     if state["food"] is not None:
         fx, fy = state["food"]
         if not (0 <= fx < w and 0 <= fy < h) or (fx, fy) in map(tuple, body):

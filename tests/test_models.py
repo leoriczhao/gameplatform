@@ -2,6 +2,7 @@
 import os
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 import numpy as np
@@ -126,45 +127,49 @@ def test_delete_model():
     assert all(m["id"] != mid for m in r.json()["models"])
 
 
-def test_microrts_session_vs_uploaded_model():
+def test_microrts_match_vs_uploaded_model():
     r = _upload("microrts", "对手模型", (1, 1546), (1, 140))
     assert r.status_code == 200, r.text
     mid = r.json()["model"]["id"]
-    r = client.post("/api/v1/microrts/play/sessions",
-                    json={"seed": 9, "opponent": {"type": "model", "model_id": mid}},
-                    headers=H)
-    assert r.status_code == 200, r.text
-    s = r.json()["session"]
-    sid = s["id"]
-    base0 = s["state"]["units"][0]["id"]
+    # v2 Match: my seat is human, the opponent seat is my uploaded model
+    r = client.post("/api/v2/matches", headers=H, json={
+        "game": "microrts",
+        "seats": [{"seat": "p0", "occupant": "me", "controller": {"type": "human"}},
+                  {"seat": "p1", "occupant": None,
+                   "controller": {"type": "model", "model_id": mid}}]})
+    assert r.status_code == 201, r.text
+    view = r.json()
+    assert view["kind"] == "pve"
+    assert view["seats"][1]["controller"]["type"] == "model"
+    uid, tick = view["id"], 0
     for _ in range(3):
-        r = client.post(f"/api/v1/microrts/play/sessions/{sid}/actions",
-                        json={"actions": [[base0, 5, 1, "worker"]]}, headers=H)
-        assert r.status_code == 200, r.text
-    assert r.json()["tick"] == 3
-    client.post(f"/api/v1/microrts/play/sessions/{sid}/leave", headers=H)
+        r = client.post(f"/api/v2/matches/{uid}/actions", headers=H,
+                        json={"tick": tick, "action": []})
+        assert r.status_code == 202, r.text
+        tick += 1
+    view = client.get(f"/api/v2/matches/{uid}", headers=H).json()
+    assert view["tick"] == 3
+    client.post(f"/api/v2/matches/{uid}/resign", headers=H)
 
 
-def test_model_autopilot_session():
+def test_model_autopilot_match():
     r = _upload("tetris", "代打模型", (1, 2, 20, 10), (1, 4))
     assert r.status_code == 200, r.text
     mid = r.json()["model"]["id"]
-    r = client.post("/api/v1/tetris/play/sessions",
-                    json={"controller": {"type": "model", "model_id": mid}},
-                    headers=H)
-    assert r.status_code == 200, r.text
-    sid = r.json()["session"]["id"]
-    # actions: null -> server runs the model. Tetris ticks only advance on
-    # hard drop (action 3), so the random model may need several autopilot
-    # steps before one lands on a hard drop — keep submitting until tick
-    # advances (bounded, deterministic given the seeded model).
+    r = client.post("/api/v2/matches", headers=H, json={
+        "game": "tetris",
+        "seats": [{"seat": "p0", "occupant": "me",
+                   "controller": {"type": "model", "model_id": mid}}]})
+    assert r.status_code == 201, r.text
+    uid = r.json()["id"]
+    assert r.json()["seats"][0]["controller"]["type"] == "model"
+    # the server drives the model seat; tetris ticks only advance on a hard
+    # drop, so poll (bounded) until the autopilot lands one.
     tick = 0
-    for _ in range(10):
-        r = client.post(f"/api/v1/tetris/play/sessions/{sid}/actions",
-                        json={"actions": None}, headers=H)
-        assert r.status_code == 200, r.text
-        tick = r.json()["tick"]
+    for _ in range(100):
+        time.sleep(0.1)
+        tick = client.get(f"/api/v2/matches/{uid}", headers=H).json()["tick"]
         if tick >= 1:
             break
     assert tick >= 1
-    client.post(f"/api/v1/tetris/play/sessions/{sid}/leave", headers=H)
+    client.post(f"/api/v2/matches/{uid}/resign", headers=H)

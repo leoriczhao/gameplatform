@@ -105,7 +105,7 @@ def new_state(seed: int) -> dict:
         "score": 0,
         "lines": 0,
         "tick": 0,
-        "seed": int(seed),
+        "_seed": int(seed),
         "done": False,
         "cause": None,
         "grid": [W, H],
@@ -137,7 +137,7 @@ def step_state(state: dict, action: int, rewards: dict | None = None) -> dict:
         out.update(board=state["board"], piece=state["piece"], next=state["next"],
                    bag=state["bag"], bag_pos=state["bag_pos"], bag_idx=state["bag_idx"],
                    score=state["score"], lines=state["lines"], tick=state["tick"],
-                   seed=state["seed"], done=True, cause=state.get("cause"),
+                   _seed=state["_seed"], done=True, cause=state.get("cause"),
                    reward=0.0)
         return out
 
@@ -145,7 +145,7 @@ def step_state(state: dict, action: int, rewards: dict | None = None) -> dict:
             nscore, nlines, ntick, done, cause, reward):
         out.update(board=nboard, piece=npiece, next=nnext, bag=nbag,
                    bag_pos=nbag_pos, bag_idx=nbag_idx, score=nscore, lines=nlines,
-                   tick=ntick, seed=state["seed"], done=done, cause=cause,
+                   tick=ntick, _seed=state["_seed"], done=done, cause=cause,
                    reward=reward)
         return out
 
@@ -196,7 +196,7 @@ def step_state(state: dict, action: int, rewards: dict | None = None) -> dict:
         if bag_pos == 7:
             bag_pos = 0
             bag_idx += 1
-            bag = shuffled_bag(state["seed"], bag_idx)
+            bag = shuffled_bag(state["_seed"], bag_idx)
         nnext = bag[bag_pos]
         npiece = spawn_piece(nid)
 
@@ -252,8 +252,8 @@ def validate_state(state: dict) -> None:
         raise ValueError("bag_pos out of range")
     if not isinstance(state["bag_idx"], int) or state["bag_idx"] < 0:
         raise ValueError("bag_idx must be a non-negative int")
-    if not isinstance(state["seed"], int):
-        raise ValueError("seed must be an int")
+    if not isinstance(state["_seed"], int):
+        raise ValueError("_seed must be an int")
     for key in ("score", "lines", "tick"):
         if not isinstance(state[key], int) or state[key] < 0:
             raise ValueError(f"{key} must be a non-negative int")

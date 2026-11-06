@@ -55,10 +55,17 @@ def list_games() -> dict:
     }
 
 
+def _active_match_count() -> int:
+    """Live v2 matches right now (waiting/active), for the ops dashboard."""
+    import match_engine
+    with match_engine._LIVE_LOCK:
+        live = list(match_engine.LIVE.values())
+    return sum(1 for m in live if m.status in ("waiting", "active"))
+
+
 @router.get("/api/health", summary="平台健康检查（v1.0-e 扩展）")
 def health() -> dict:
-    """服务探活 + 每游戏概要 + 运行指标（活跃会话数 / DB 大小）。"""
-    import sessions as session_store
+    """服务探活 + 每游戏概要 + 运行指标（进行中对局数 / DB 大小）。"""
     import auth as auth_store
     db_size = 0
     try:
@@ -74,7 +81,7 @@ def health() -> dict:
             }
             for g in sorted_games()
         },
-        "active_sessions": session_store.active_session_count(),
+        "active_sessions": _active_match_count(),
         "db_size_bytes": db_size,
         "time": int(time.time()),
     }

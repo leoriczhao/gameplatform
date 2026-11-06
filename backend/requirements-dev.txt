@@ -1,5 +1,6 @@
 # Dev/test dependencies only — not installed in the Docker image.
 pytest==8.3.5
+pytest-cov==6.3.0
 httpx==0.28.1
 onnx==1.17.0
 requests>=2.32,<3

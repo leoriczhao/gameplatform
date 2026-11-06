@@ -1,5 +1,7 @@
-"""UGC store (11 P3): tables, quotas, upload flow, lifecycle state machine,
-registry sync, smoke tests, notifications.
+"""UGC store (11 P3, L3 in docs/design/19): tables, quotas, upload flow,
+lifecycle state machine, registry sync, notifications, distribution policy.
+What happens to a package's bytes (validate/scan/extract/smoke/archive) is
+package_pipeline (L1).
 
 Design: docs/design/10 §6-§8。状态机：
   draft ──submit──▶ pending ──approve──▶ published
@@ -16,18 +18,17 @@ import sqlite3
 import time
 from pathlib import Path
 
-import contract_check
+import package_pipeline
 import registry
+from gamekernel import manifest as kernel_manifest
 import ugc_pack
 import ugc_proxy
 import ugc_runner
-import ugc_static
 
 SCORES_DB = Path(os.environ.get("SCORES_DB", "/data/scores.db"))
 MODELS_DIR = Path(os.environ.get("MODELS_DIR", str(SCORES_DB.parent / "models")))
 MAX_DRAFTS = 5        # 作者名下 draft/pending/published 游戏总数
 MAX_PUBLISHED = 3     # 其中 published 上限
-SMOKE_STEPS = 20
 
 
 def _db() -> sqlite3.Connection:
@@ -146,6 +147,16 @@ def version_adapter(slug: str, version: str):
                                   on_unhealthy=lambda _gid: fuse(v["game_id"]))
 
 
+class _VersionStore:
+    """registry.PackageStore backed by the UGC version tables."""
+
+    def version_adapter(self, slug: str, version: str):
+        return version_adapter(slug, version)
+
+
+registry.set_package_store(_VersionStore())
+
+
 def _versions_of(game_id: int) -> list[dict]:
     conn = _db()
     try:
@@ -234,42 +245,7 @@ def _publish_quota_ok(owner_id: int) -> tuple[bool, str]:
 # ------------------------------------------------------------ smoke + upload
 
 def _smoke(slug: str, game_dir: Path, meta: dict) -> dict:
-    """沙箱冒烟：info/new_state/20 步 sample_action 推进 + PvP 复合步。"""
-    wid = f"smoke:{slug}:{time.time_ns()}"
-    ugc_runner.drop_worker(wid)
-    w = None
-    try:
-        w = ugc_runner.GameWorker(wid, game_dir)
-        info = w.request("info")
-        s = w.request("new_state", seed=1)
-        w.request("validate_state", state=s)
-        steps = 0
-        while steps < SMOKE_STEPS and not s.get("done"):
-            try:
-                a = w.request("sample_action", state=s)
-                w.request("validate_action", action=a, state=s)
-            except ugc_runner.WorkerError:
-                break
-            s = w.request("step_state", state=s, action=a)
-            w.request("validate_state", state=s)
-            steps += 1
-        if (meta.get("pvp") or {}).get("enabled"):
-            # PvP 开局附加参数（如 microrts {opponent: external}）进入双人模式
-            pvp_opts = (meta.get("pvp") or {}).get("options")
-            s_pvp = w.request("new_state", seed=1, options=pvp_opts) \
-                if pvp_opts else s
-            a0 = w.request("sample_action", state=s_pvp)
-            s2 = w.request("step_state", state=s_pvp,
-                           action={"p0": a0, "p1": a0})
-            w.request("validate_state", state=s2)
-        bounds = w.request("score_bounds")
-        return {"ok": True, "steps": steps, "done": bool(s.get("done")),
-                "score_bounds": bounds, "info": info}
-    except Exception as e:
-        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
-    finally:
-        if w is not None:
-            w.stop()
+    return package_pipeline.smoke(slug, game_dir, meta)
 
 
 def _version_tuple(v: str) -> tuple[int, ...]:
@@ -280,77 +256,20 @@ def _version_tuple(v: str) -> tuple[int, ...]:
 
 
 def _cleanup_dir(dest: Path) -> None:
-    import shutil
-    root = (MODELS_DIR / "ugc").resolve()
-    if str(dest.resolve()).startswith(str(root)):
-        shutil.rmtree(dest, ignore_errors=True)
+    package_pipeline.cleanup_dir(dest, MODELS_DIR / "ugc")
 
 
 def _reject(msg: str):
     raise ValueError(msg)
 
 
-def _check_resources(dest: Path) -> None:
-    """包内 .npz/.npy 资源必须可被 numpy 加载（12 §3 只读资源校验）。"""
-    import numpy as np
-    for p in sorted(dest.rglob("*.npz")):
-        try:
-            np.load(str(p), allow_pickle=False)
-        except Exception as e:
-            _cleanup_dir(dest)
-            _reject(f"资源文件损坏：{p.name}（{type(e).__name__}）")
-    for p in sorted(dest.rglob("*.npy")):
-        try:
-            np.load(str(p), allow_pickle=False)
-        except Exception as e:
-            _cleanup_dir(dest)
-            _reject(f"资源文件损坏：{p.name}（{type(e).__name__}）")
-
-
 def _ingest(data: bytes, expect_slug: str | None = None,
             renderer_enabled: bool = False) -> tuple[dict, Path]:
-    """校验 → 静态扫描 → 解包 → 资源校验 → 冒烟。返回 (stored_meta, extracted_dir)。
-
-    renderer_enabled 仅官方种子包置 True；UGC 由管理员审核后显式开启（16 §5.1）。
-    """
-    builtin = set(registry.GAMES)   # 已注册的 slug 视为占用（种子包先占，天然防冲突）
-    if expect_slug is not None:
-        builtin.discard(expect_slug)   # 自家已发布游戏的 slug 不算冲突
-    report = ugc_pack.validate_package(data, builtin_games=builtin)
-    meta = report["meta"]
-    if expect_slug is not None and meta["slug"] != expect_slug:
-        _reject(f"slug 不可更改（{expect_slug} → {meta['slug']}）")
-    dest = MODELS_DIR / "ugc" / meta["slug"] / f"v{int(time.time_ns())}"
-    ugc_pack.extract_package(data, dest)
-    _check_resources(dest)
-    scan = ugc_static.scan_dir(dest)
-    if not scan["ok"]:
-        _cleanup_dir(dest)
-        head = "; ".join(f"{v['file']}:{v['line']} {v['detail']}"
-                           for v in scan["violations"][:3])
-        _reject(f"静态扫描未通过：{head}")
-    rscan = None
-    rend = meta.get("renderer")
-    if rend:
-        try:
-            rtext = (dest / rend["entry"]).read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
-            _cleanup_dir(dest)
-            _reject("渲染器文件不可读（需 UTF-8 文本）")
-        rscan = ugc_static.scan_renderer(rtext)
-        if not rscan["ok"]:
-            _cleanup_dir(dest)
-            head = "; ".join(f"{v['line']} {v['detail']}"
-                             for v in rscan["violations"][:3])
-            _reject(f"渲染器静态扫描未通过：{head}")
-    smoke = _smoke(meta["slug"], dest, meta)
-    if not smoke["ok"]:
-        _cleanup_dir(dest)
-        _reject(f"沙箱冒烟失败：{smoke['error']}")
-    stored = {"meta": meta, "sha256": report["sha256"],
-              "scan": scan, "renderer_scan": rscan, "smoke": smoke,
-              "renderer_enabled": bool(rend) and renderer_enabled}
-    return stored, dest
+    """包处理流水线（package_pipeline.ingest）；已注册游戏的 slug 视为占用
+    （种子包先占，天然防冲突）。"""
+    return package_pipeline.ingest(data, MODELS_DIR / "ugc", taken_slugs=registry.GAMES,
+                                   expect_slug=expect_slug,
+                                   renderer_enabled=renderer_enabled)
 
 
 def create_game(owner_id: int, data: bytes, changelog: str) -> tuple[dict, dict]:
@@ -493,7 +412,7 @@ def _register_game(game: dict, version: dict) -> None:
                                      on_unhealthy=lambda _sid: fuse(game["id"]))
     info = adapter.info()  # require a usable sandbox before exposing the new version
     # A1：game.yaml contract.* 必须与运行时 schemas 一致（否则拒绝注册）
-    contract_check.validate_contract(meta, info)
+    kernel_manifest.validate_contract(meta, info)
     registry.GAMES[game["slug"]] = adapter
     if game["slug"] not in _MOUNTED_SLUGS and _ROUTER_MOUNTER is not None:
         _ROUTER_MOUNTER(adapter)   # 挂一次即可；env 路由内部按请求动态解析 adapter
@@ -609,6 +528,43 @@ def version_row(slug: str, version: str,
         if v["version"] == version and v["status"] in statuses:
             return game, v
     return None
+
+
+# ------------------------------------------------- 本地训练：游戏包分发（18）
+
+def _is_official(owner_id: int) -> bool:
+    import auth as auth_store
+    u = auth_store.user_by_id(owner_id)
+    return bool(u) and u.get("role") in ("admin", "system")
+
+
+def package_release(slug: str, version: str | None = None) -> tuple[dict, dict]:
+    """可供本地训练下载的已发布版本 → (manifest, version_row)。
+
+    官方包始终可下载；UGC 需作者在 game.yaml 声明 local_training: true。
+    KeyError：游戏或版本不存在 / 未发布；PermissionError：未开放本地训练。"""
+    game = get_game_by_slug(slug)
+    if game is None or game["status"] != "published":
+        raise KeyError(f"游戏 {slug!r} 不存在或未发布")
+    if version is None:
+        v = active_version(game["id"])
+    else:
+        found = version_row(slug, version)
+        v = found[1] if found else None
+    if v is None:
+        raise KeyError(f"游戏 {slug!r} 没有可用版本 {version or ''}".strip())
+    meta = dict(v["meta"].get("meta", v["meta"]))
+    official = _is_official(game["owner_id"])
+    if not (official or meta.get("local_training") is True):
+        raise PermissionError("该游戏未开放本地训练（作者需在 game.yaml 声明 local_training: true）")
+    data, sha256 = package_pipeline.archive(v["package_path"])
+    manifest = {
+        "slug": slug, "version": v["version"], "official": official,
+        "sha256": sha256, "size": len(data),
+        "url": f"/api/v1/games/{slug}/package/{v['version']}.zip",
+        "meta": meta,
+    }
+    return manifest, v
 
 
 def ban(game_id: int, admin_id: int) -> dict:

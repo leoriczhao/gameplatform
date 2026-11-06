@@ -1,4 +1,7 @@
-"""Social tests (v1.0-b): profile, friends, room chat, notifications."""
+"""Social tests (v1.0-b): profile, friends, notifications.
+
+Room chat moved to the v2 match event stream (design 17 M4); its coverage
+lives in tests/test_match_v2.py and tests/test_match_stream.py."""
 import os
 import sys
 import tempfile
@@ -95,48 +98,6 @@ def test_friends_requires_login():
     assert client.get("/api/v1/friends").status_code == 401
     assert client.post("/api/v1/friends", json={"username": "x"}).status_code == 401
 
-
-def test_room_chat_participants_only_and_since_cursor():
-    A = _user("soca3")
-    B = _user("socb3")
-    C = _user("socc3")
-    r = client.post("/api/v1/microrts/play/rooms",
-                    json={"mode": "casual", "visibility": "private"}, headers=_h(A))
-    sid = r.json()["session"]["id"]
-    client.post(f"/api/v1/microrts/play/rooms/{sid}/join",
-                json={"invite": r.json()["invite"]}, headers=_h(B))
-
-    # third party cannot read or write
-    assert client.get(f"/api/v1/microrts/play/sessions/{sid}/chat?since=0",
-                      headers=_h(C)).status_code == 403
-    assert client.post(f"/api/v1/microrts/play/sessions/{sid}/chat",
-                       json={"text": "hi"}, headers=_h(C)).status_code == 403
-
-    # A and B exchange messages
-    r = client.post(f"/api/v1/microrts/play/sessions/{sid}/chat",
-                    json={"text": "  你好，我是 A  "}, headers=_h(A))
-    assert r.status_code == 200, r.text
-    m1 = r.json()["message"]
-    assert m1["text"] == "你好，我是 A" and m1["nickname"] == "soca3"
-    r = client.post(f"/api/v1/microrts/play/sessions/{sid}/chat",
-                    json={"text": "收到！"}, headers=_h(B))
-    m2 = r.json()["message"]
-
-    # empty text rejected
-    assert client.post(f"/api/v1/microrts/play/sessions/{sid}/chat",
-                       json={"text": "   "}, headers=_h(A)).status_code == 400
-
-    # B polls from 0 -> sees both in order; since cursor skips old messages
-    r = client.get(f"/api/v1/microrts/play/sessions/{sid}/chat?since=0", headers=_h(B))
-    msgs = r.json()["messages"]
-    assert [m["id"] for m in msgs] == [m1["id"], m2["id"]]
-    assert r.json()["next_since"] == m2["id"]
-    r = client.get(f"/api/v1/microrts/play/sessions/{sid}/chat?since={m1['id']}",
-                   headers=_h(B))
-    assert [m["id"] for m in r.json()["messages"]] == [m2["id"]]
-    # history survives a fresh poll (persisted, not in-memory)
-    r = client.get(f"/api/v1/microrts/play/sessions/{sid}/chat?since=0", headers=_h(A))
-    assert len(r.json()["messages"]) == 2
 
 
 def test_notifications_read_flow():

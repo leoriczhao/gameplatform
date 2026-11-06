@@ -88,6 +88,7 @@ class RemoteVecEnv:
                 raise ValueError(f"n={n} exceeds {game} "
                                  f"max_concurrent_envs={self.max_concurrent_envs}")
             self._episode_seeds = [int(seed) + i for i in range(n)]
+            self.current_seeds: list[int | None] = [None] * n  # seed of each slot's episode
             self._dones = np.zeros(n, dtype=bool)
 
             self._obs_fn = make_obs_fn(game, obs_mode, R)
@@ -130,6 +131,7 @@ class RemoteVecEnv:
         if self.rewards is not None:
             payload["rewards"] = self.rewards
         result = self._clients[i].reset(**_json_value(payload))
+        self.current_seeds[i] = self._episode_seeds[i]
         environment = result.observation["metadata"]["environment"]
         if environment["version"] != self.game_version:
             raise RuntimeError("OpenEnv reset changed the pinned game version")

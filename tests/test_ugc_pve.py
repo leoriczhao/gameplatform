@@ -1,5 +1,6 @@
-"""PvE match recording (11 P4): a finished PvE session persists as a
-kind=pve match and is viewable through the public replay endpoint."""
+"""PvE match recording (11 P4): a finished v2 practice match persists as a
+kind=pve record and its sealed frames are readable through the v2 stage API.
+(The v1 play-session and public replay endpoints were removed in M4.)"""
 import io
 import os
 import sys
@@ -20,8 +21,20 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 import admin as admin_store  # noqa: E402
 import main  # noqa: E402
+import registry  # noqa: E402
+import ugc_runner  # noqa: E402
 
 client = TestClient(main.app)
+
+
+@pytest.fixture(autouse=True)
+def _restore_registry():
+    """Published test games never leak into other test modules."""
+    before = set(registry.GAMES)
+    yield
+    for slug in set(registry.GAMES) - before:
+        registry.unregister(slug)
+        ugc_runner.drop_worker(slug)
 
 GOOD_YAML = """slug: pve-counter
 title: PvE 计数器
@@ -107,25 +120,27 @@ def _publish(admin, author):
                        headers=_h(admin)).status_code == 200
 
 
-def test_pve_finish_records_match_and_replay(admin):
+def test_pve_finish_records_match_and_seals_frames(admin):
     A = _user("ugcpve1")
     _publish(admin, A)
-    # 开一局 PvE，走 3 步到 done
-    r = client.post("/api/v1/pve-counter/play/sessions",
-                    json={"seed": 7}, headers=_h(A))
-    assert r.status_code == 200, r.text
-    sid = r.json()["session"]["id"]
+    # 开一局 v2 练习局（选定 seed -> 不入榜），走 3 步到 done
+    r = client.post("/api/v2/matches", headers=_h(A),
+                    json={"game": "pve-counter", "settings": {"seed": 7}})
+    assert r.status_code == 201, r.text
+    uid, tick = r.json()["id"], 0
     for _ in range(3):
-        r = client.post(f"/api/v1/pve-counter/play/sessions/{sid}/actions",
-                        json={"actions": 1}, headers=_h(A))
-        assert r.status_code == 200, r.text
-    assert r.json()["done"] is True
-    # 落库：我的对局里出现一条 pve，且公开回放端点可读
+        r = client.post(f"/api/v2/matches/{uid}/actions", headers=_h(A),
+                        json={"tick": tick, "action": 1})
+        assert r.status_code == 202, r.text
+        tick += 1
+    view = client.get(f"/api/v2/matches/{uid}", headers=_h(A)).json()
+    assert view["status"] == "finished"
+    # 落库：我的对局里出现一条 pve，且封存帧可读（seed + 每步动作）
     mine = client.get("/api/v1/matches", headers=_h(A)).json()["matches"]
-    pve = [m for m in mine if m["kind"] == "pve" and m["game"] == "pve-counter"]
-    assert pve, mine
-    mid = pve[0]["id"]
-    rp = client.get(f"/api/v1/matches/{mid}/replay")
-    assert rp.status_code == 200, rp.text
-    body = rp.json()["replay"]
-    assert body["seed"] == 7 and len(body["moves"]) == 3
+    row = next(m for m in mine if m.get("uid") == uid)
+    assert row["kind"] == "pve" and row["game"] == "pve-counter"
+    assert row["status"] == "finished" and row["result"]["cause"] == "done"
+    frames = client.get(f"/api/v2/matches/{uid}/frames", headers=_h(A)).json()
+    assert frames["total"] == 4
+    assert frames["frames"][0]["frame"]["seed"] == 7
+    assert [f["actions"] for f in frames["frames"][1:]] == [{"p0": 1}] * 3

@@ -141,14 +141,23 @@ function ChallengeDialog({ model, games, token, onClose, onCreated }) {
     setBusy(true);
     setError("");
     try {
-      const opponent = `ai:${strategy}`;
-      const data = await post(
-        "/api/v1/matches",
-        { game: model.game, model_a: model.id, model_b: opponent },
+      // v2（设计 17 §5.1）：模型占 P0 座位、内置 AI 占 P1 座位，服务端托管推进；
+      // 舞台直接打开 /m/:id，不再走 v1 的异步模型对战线程。
+      const view = await post(
+        "/api/v2/matches",
+        {
+          game: model.game,
+          mode: "practice",
+          visibility: "unlisted",
+          seats: [
+            { seat: "p0", occupant: "me", controller: { type: "model", model_id: model.id } },
+            { seat: "p1", occupant: null, controller: { type: "ai", strategy } },
+          ],
+        },
         token,
       );
-      toast.success("挑战已创建，正在排队执行");
-      onCreated(data.match_id);
+      toast.success("对局已创建，正在打开舞台");
+      onCreated(view.id);
       onClose();
     } catch (e) {
       setError(e.message || "创建挑战失败");
@@ -476,7 +485,7 @@ export default function Models() {
             games={games}
             token={token}
             onClose={() => setChallengeFor(null)}
-            onCreated={(matchId) => navigate(`/matches?match=${matchId}`)}
+            onCreated={(matchId) => navigate(`/m/${matchId}`)}
           />
         </Modal>
       ) : null}

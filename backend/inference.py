@@ -1,18 +1,15 @@
-"""ONNX inference — game-agnostic runner (12 §4.4 / 13 G3).
+"""ONNX inference — the onnxruntime shell around gamekernel.models (19).
 
-The platform knows NOTHING about individual games here. A game's model face
-comes entirely from its package declaration (meta.contract):
-
-    contract: {in_shape, out_shape, protocol: simple|composite, obs_mode?}
-
-- simple:    obs(state, obs_mode) -> model -> argmax  (obs reshaped to in_shape)
-- composite: model_inputs(state, owner) per-query inputs -> model each ->
-             model_decode(outputs, state, owner) in the game's sandbox
+The platform knows NOTHING about individual games here. The model protocol
+(simple / composite, from the package's meta.contract) lives in the kernel and
+is shared with the SDK; this module loads sessions, checks uploaded files
+against the contract and runs the protocol against the registered adapter.
 """
 from __future__ import annotations
 
 import numpy as np
 import onnxruntime as ort
+from gamekernel import models as kernel_models
 
 
 class ModelError(Exception):
@@ -26,16 +23,7 @@ def _contract_for(game: str, adapter=None) -> dict | None:
     if adapter is None:
         return None
     meta = getattr(adapter, "meta", None) or {}
-    contract = meta.get("contract")
-    if not isinstance(contract, dict):
-        return None
-    in_shape = tuple(contract.get("in_shape") or ())
-    out_shape = tuple(contract.get("out_shape") or ())
-    if not in_shape or not out_shape:
-        return None
-    return {"name": f"game.{game}", "input": in_shape, "output": out_shape,
-            "protocol": contract.get("protocol", "simple"),
-            "obs_mode": contract.get("obs_mode")}
+    return kernel_models.contract_of({**meta, "slug": game})
 
 
 def supports_models(game: str) -> bool:
@@ -86,21 +74,12 @@ def model_action(game: str, sess, state: dict, owner: int = 0, *, adapter=None):
     c = _contract_for(game, adapter)
     if c is None:
         raise ModelError(f"game {game!r} 未声明模型契约")
-    if c["protocol"] == "composite":
-        inputs = adapter.model_inputs(state, owner)
-        xs = [np.asarray(x, dtype=np.float32).reshape(c["input"]) for x in inputs]
-        # 输出转纯 list 再过沙箱 IPC（ndarray 不可 JSON 序列化）
-        outs = [np.asarray(_run(sess, x), dtype=np.float32).ravel().tolist()
-                for x in xs]
-        return adapter.model_decode(outs, state, owner)
-    # simple：obs → 模型 → argmax
-    mode = c.get("obs_mode")
-    if not mode:
-        modes = adapter.info().get("obs_modes") or []
-        mode = modes[0] if modes else None
-    obs = adapter.obs(state, mode)
-    if obs is None:
-        raise ModelError(f"game {game!r} 未实现 obs，无法用于模型托管")
-    x = np.asarray(obs, dtype=np.float32).reshape(c["input"])
-    q = _run(sess, x)[0]
-    return int(np.argmax(q))
+    modes = () if c["protocol"] == "composite" or c.get("obs_mode") else \
+        tuple(adapter.info().get("obs_modes") or ())
+    try:
+        return kernel_models.model_action(adapter, c, lambda x: _run(sess, x), state,
+                                          owner, obs_modes=modes)
+    except ValueError as e:
+        if "no observation" in str(e):
+            raise ModelError(f"game {game!r} 未实现 obs，无法用于模型托管") from e
+        raise

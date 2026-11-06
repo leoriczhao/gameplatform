@@ -23,9 +23,22 @@ from pydantic import Field, WithJsonSchema, create_model
 
 import registry
 from api_limits import rate_limit
-from environment_contract import (
-    checked_rewards, describe_environment, environment_schemas,
+from gamekernel.episode import (
+    Episode, check_reset_args, coerce_reward, environment_schemas, resolve_obs_mode,
 )
+
+def describe_environment(adapter, *, max_concurrent_envs: int) -> dict:
+    """The OpenEnv environment description: package info + platform identity."""
+    info = dict(adapter.info() or {})
+    info.pop("max_batch", None)  # internal worker batching is not a public API
+    meta = getattr(adapter, "meta", None) or {}
+    out = {**info, "game": adapter.game_id, "name": adapter.name,
+           "schemas": environment_schemas(info), "meta": meta,
+           "max_concurrent_envs": max_concurrent_envs}
+    if meta.get("version") is not None:
+        out["version"] = str(meta["version"])
+    return out
+
 
 # ------------------------------------------------------------------ 常量
 
@@ -133,7 +146,7 @@ class PlatformEnvironment(Environment[Action, PlatformObservation, PlatformState
         self._step_count = 0
         self._obs_mode: str | None = None
         self._include_state = False
-        self._rewards: dict = {}
+        self._episode: Episode | None = None  # 推进规则在 gamekernel（设计 19）
         self._frozen_adapter = None  # 本会话绑定的游戏包版本
         self._mcp_server = None      # 懒构建的 FastMCP 工具面
         self._tool_lock = threading.Lock()  # MCP 工具调用串行化
@@ -190,14 +203,7 @@ class PlatformEnvironment(Environment[Action, PlatformObservation, PlatformState
             type="state", state=state,
             reward=reward, done=done, metadata=meta)
 
-    @staticmethod
-    def _coerce_reward(reward) -> float | None:
-        if reward is None:
-            return None
-        try:
-            return float(reward)
-        except (TypeError, ValueError):
-            return None
+    _coerce_reward = staticmethod(coerce_reward)
 
     # ---------------------------------------------------------- MCP 工具面
     # 官方 HTTPEnvServer 在环境实例上查找 mcp_server（FastMCP），把 JSON-RPC
@@ -287,29 +293,19 @@ class PlatformEnvironment(Environment[Action, PlatformObservation, PlatformState
         except registry.VersionUnavailable as exc:
             raise ValueError(str(exc)) from exc
         seed = DEFAULT_SEED if seed is None else seed
-        if isinstance(seed, bool) or not isinstance(seed, int) or seed < 0:
-            raise ValueError("seed must be a non-negative integer")
-        if options is not None and not isinstance(options, dict):
-            raise ValueError("options must be an object")
+        check_reset_args(seed, options)
         if not isinstance(include_state, bool):
             raise ValueError("include_state must be a boolean")
-        modes = (cur.info() or {}).get("obs_modes") or []
-        if obs_mode is None:
-            mode = modes[0] if modes else None
-        elif obs_mode == "state":
-            mode = None
-        elif isinstance(obs_mode, str) and obs_mode in modes:
-            mode = obs_mode
-        else:
-            raise ValueError(f"unknown obs_mode {obs_mode!r} (available: {modes + ['state']})")
-        configured_rewards = checked_rewards(cur.info() or {}, rewards)
+        info = cur.info() or {}
+        mode = resolve_obs_mode(info, obs_mode)
+        episode = Episode(cur, info, rewards)
         # Validate official episode metadata before changing the active episode.
         State(episode_id=episode_id, step_count=0)
-        state = cur.new_state(seed, options)
+        state = episode.reset(seed, options)
         self._frozen_adapter = cur
         self._obs_mode = mode
         self._include_state = include_state
-        self._rewards = configured_rewards
+        self._episode = episode
         self._game_state = state
         self._seed = seed
         self._episode_id = episode_id
@@ -328,13 +324,11 @@ class PlatformEnvironment(Environment[Action, PlatformObservation, PlatformState
         if self._game_state is None:
             raise ValueError("no active episode: reset on the same WebSocket or MCP session first")
         raw = getattr(action, "value", None)
-        cur.validate_action(raw, self._game_state)
-        nxt = cur.step_state(self._game_state, raw, self._rewards)
+        nxt, reward, done = self._episode.step(raw)
         self._game_state = nxt
-        self._step_count += 1
-        reward = self._coerce_reward(nxt.get("reward", 0.0))
+        self._step_count = self._episode.step_count
         meta = self._pack_meta(nxt, step_count=self._step_count)
-        return self._pack_obs(cur, nxt, meta, reward, bool(nxt.get("done", False)))
+        return self._pack_obs(cur, nxt, meta, reward, done)
 
     @property
     def state(self) -> PlatformState:
@@ -373,7 +367,7 @@ class PlatformEnvironment(Environment[Action, PlatformObservation, PlatformState
         self._seed = None
         self._episode_id = None
         self._step_count = 0
-        self._rewards = {}
+        self._episode = None
         self._obs_mode = None
         self._include_state = False
         self._mcp_server = None

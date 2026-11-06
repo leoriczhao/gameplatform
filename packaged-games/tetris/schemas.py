@@ -33,7 +33,7 @@ STATE_SCHEMA = {
     "$schema": _DRAFT,
     "type": "object",
     "required": ["board", "piece", "next", "bag", "bag_pos", "bag_idx",
-                 "score", "lines", "tick", "seed", "done", "cause", "grid"],
+                 "score", "lines", "tick", "_seed", "done", "cause", "grid"],
     "properties": {
         "board": _fixed_array(
             _fixed_array({"type": "integer", "minimum": 0, "maximum": 7}, 10),
@@ -48,7 +48,8 @@ STATE_SCHEMA = {
         "score": {"type": "integer", "minimum": 0},
         "lines": {"type": "integer", "minimum": 0},
         "tick": {"type": "integer", "minimum": 0},
-        "seed": {"type": "integer"},
+        "_seed": {"type": "integer",
+                  "description": "Server-private: hidden from live match viewers, revealed after the match"},
         "done": {"type": "boolean"},
         "cause": {"enum": [None, "lockout"]},
         "grid": {"const": [10, 20]},

@@ -1,29 +1,24 @@
-"""Match records, ELO ratings, and the async model-vs-model match worker.
+"""Match records, ELO ratings, and v2 match persistence.
 
-Design: docs/design/03 + 04.
+Design: docs/design/17（v2 对局）+ 03（历史 v1 记录）.
 
-- Every finished PvP session is recorded as a match and updates both players'
-  ratings (ELO, K=32, start 1200) — only for registered users.
-- Model-vs-model matches run in a background worker pool; the result and
-  replay are stored for later viewing.
+- v2 matches (PvE/PvP/model seats) are created in SQLite on creation
+  (insert_v2), get their seats/frames persisted, and finish with update_v2.
+- The matches table also keeps archived v1 rows (kind pvp/pve/model_vs_model
+  with a replay JSON column). Those columns and rows stay readable for the
+  history APIs and the one-off M4 migration script; no v1 writer remains.
+- ELO bookkeeping (K=32, start 1200) is shared by v2 ranked matches.
 """
 from __future__ import annotations
 
+import gzip
 import json
 import sqlite3
-import threading
 import time
 from pathlib import Path
 
-import growth
-import inference
-import models as model_store
-from registry import GAMES, resolve
-
 SCORES_DB = Path(__import__("os").environ.get("SCORES_DB", "/data/scores.db"))
 
-MATCH_STEP_CAP = 1500
-MATCH_WORKER_LIMIT = threading.BoundedSemaphore(8)
 _K = 32
 _START_RATING = 1200
 
@@ -36,16 +31,23 @@ def _db() -> sqlite3.Connection:
         """CREATE TABLE IF NOT EXISTS matches (
                id INTEGER PRIMARY KEY AUTOINCREMENT,
                game TEXT NOT NULL,
-               kind TEXT NOT NULL,           -- pvp | model_vs_model
+               kind TEXT NOT NULL,           -- pvp | pve | model_vs_model
                players TEXT NOT NULL,        -- JSON [{user_id, name, side}]
                models TEXT NOT NULL DEFAULT '[]',  -- JSON [model_id, ...]
-               status TEXT NOT NULL,         -- queued | running | finished | failed
-               result TEXT,                  -- JSON {winner, cause, damage}
-               replay TEXT,                  -- JSON moves
+               status TEXT NOT NULL,         -- waiting | active | finished | ...
+               result TEXT,                  -- JSON {winner, cause, ...}
+               replay TEXT,                  -- archived v1 rows only (M4 keeps the column)
                created_at REAL NOT NULL,
                finished_at REAL
            )"""
     )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS rating_history (
+               id INTEGER PRIMARY KEY AUTOINCREMENT, game TEXT NOT NULL,
+               user_id INTEGER NOT NULL, rating REAL NOT NULL,
+               created_at REAL NOT NULL)""")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_rh_game_user ON rating_history(game, user_id, id)")
     conn.execute(
         """CREATE TABLE IF NOT EXISTS ratings (
                game TEXT NOT NULL,
@@ -56,17 +58,53 @@ def _db() -> sqlite3.Connection:
                PRIMARY KEY (game, user_id)
            )"""
     )
+    _ensure_v2_schema(conn)
     return conn
 
 
-def _row(row) -> dict:
-    return {"id": row[0], "game": row[1], "kind": row[2],
-            "players": json.loads(row[3] or "[]"),
-            "models": json.loads(row[4] or "[]"),
-            "status": row[5],
-            "result": json.loads(row[6]) if row[6] else None,
-            "replay": json.loads(row[7]) if row[7] else None,
-            "created_at": row[8], "finished_at": row[9]}
+# v2 对局（设计 17）：记录仍在 matches 表，创建即落库；uid 为对外 id（不可猜，
+# unlisted 凭链接可读的前提），座位进 match_seats。
+_V2_COLUMNS = {"uid": "TEXT", "mode": "TEXT", "visibility": "TEXT",
+               "version": "TEXT", "clock": "TEXT", "frames": "TEXT"}
+_V2_READY: set[str] = set()
+
+
+def _ensure_v2_schema(conn) -> None:
+    if str(SCORES_DB) in _V2_READY:
+        return
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(matches)")}
+    for col, kind in _V2_COLUMNS.items():
+        if col not in cols:
+            conn.execute(f"ALTER TABLE matches ADD COLUMN {col} {kind}")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_matches_uid ON matches(uid)")
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS match_seats (
+               match_id INTEGER NOT NULL, seat TEXT NOT NULL,
+               user_id INTEGER, controller TEXT NOT NULL,
+               PRIMARY KEY (match_id, seat))""")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_seats_user ON match_seats(user_id)")
+    conn.commit()
+    _V2_READY.add(str(SCORES_DB))
+
+
+def _row(row, columns=None) -> dict:
+    # v2 的 uid / mode / visibility / version 是 ALTER TABLE 追加的列，历史库的
+    # 物理顺序可能不同，所以按 cursor.description 里的列名取值；前端
+    # /matches → /m/:id 需要 uid（设计 17 M3）。
+    out = {"id": row[0], "game": row[1], "kind": row[2],
+           "players": json.loads(row[3] or "[]"),
+           "models": json.loads(row[4] or "[]"),
+           "status": row[5],
+           "result": json.loads(row[6]) if row[6] else None,
+           "replay": json.loads(row[7]) if row[7] else None,
+           "created_at": row[8], "finished_at": row[9]}
+    if columns:
+        by_name = dict(zip(columns, row))
+        out["uid"] = by_name.get("uid")
+        out["mode"] = by_name.get("mode")
+        out["visibility"] = by_name.get("visibility")
+        out["version"] = by_name.get("version")
+    return out
 
 
 # ----------------------------------------------------------------- ratings
@@ -95,7 +133,6 @@ def get_rating(game: str, user_id: int) -> float:
 
 def update_ratings(game: str, p0_id: int, p1_id: int, winner: int | None) -> None:
     """ELO update after a finished human PvP match (winner None = draw)."""
-    growth.ensure_schema()   # rating_history lives in the growth schema
     conn = _db()
     try:
         ratings = _get_ratings(conn, game, [p0_id, p1_id])
@@ -121,128 +158,136 @@ def update_ratings(game: str, p0_id: int, p1_id: int, winner: int | None) -> Non
         conn.close()
 
 
-# ----------------------------------------------------------------- records
-
-def record_pvp_finish(sess) -> int:
-    """Store a finished PvP session as a match; update ratings.
-
-    casual rooms are recorded but do NOT touch ELO (D10); ranked rooms
-    update both players' ratings as before."""
-    players = [
-        {"user_id": sess.p0["id"], "name": sess.p0["nickname"] or sess.p0["username"],
-         "side": "p0"},
-        {"user_id": sess.p1["id"], "name": sess.p1["nickname"] or sess.p1["username"],
-         "side": "p1"},
-    ]
-    result = {"winner": sess.winner, "cause": sess.cause,
-              "damage": sess.state.get("damage", [0, 0]),
-              "mode": getattr(sess, "mode", "ranked")}
-    # replay carries the map seed so the replay viewer can rebuild every
-    # state locally from the moves via the env API (07 M4 note)
-    seed = sess.seed
-    replay = {"schema_version": 1,
-              "game_version": getattr(sess, "game_version", None),
-              "seed": seed,
-              "options": getattr(sess, "env_options", None),
-              "moves": sess.moves}
+def rating_history(game: str, user_id: int, limit: int = 50) -> list[dict]:
+    """ELO after each settlement, oldest first (for the 走势 sparkline)."""
     conn = _db()
     try:
-        cur = conn.execute(
-            "INSERT INTO matches (game, kind, players, models, status, result, "
-            "replay, created_at, finished_at) VALUES (?,?,?,?,?,?,?,?,?)",
-            (sess.game, "pvp", json.dumps(players), "[]", "finished",
-             json.dumps(result), json.dumps(replay),
-             sess.created_at, time.time()))
-        conn.commit()
-        match_id = cur.lastrowid
+        rows = conn.execute(
+            "SELECT rating, created_at FROM rating_history "
+            "WHERE game = ? AND user_id = ? ORDER BY id DESC LIMIT ?",
+            (game, user_id, limit)).fetchall()
     finally:
         conn.close()
-    if getattr(sess, "mode", "ranked") == "ranked":
-        update_ratings(sess.game, sess.p0["id"], sess.p1["id"], sess.winner)
-    # XP for both players regardless of mode (08 §1; per-session idempotent)
-    if not getattr(sess, "_xp_awarded", False):
-        growth.award_pvp(sess)
-        sess._xp_awarded = True
-    return match_id
+    return [{"rating": r[0], "created_at": r[1]} for r in reversed(rows)]
 
 
-def record_pve_finish(sess) -> int | None:
-    """Store a finished PvE session as a match (kind=pve, 11 P4).
+# ------------------------------------------------------------- v2 records
 
-    Registered users only: a guest has no account to attach the history to.
-    No ELO (PvE is single-player); XP is awarded separately in step_session.
-    The replay keeps seed + moves so the viewer rebuilds every state locally."""
-    uid = sess.principal.get("id") if sess.principal else None
-    if not uid:
-        return None
-    players = [{"user_id": uid,
-                "name": sess.principal.get("nickname")
-                        or sess.principal.get("username"),
-                "side": "p0"}]
-    result = {"winner": sess.winner, "cause": sess.cause,
-              "controller": bool(getattr(sess, "controller", None))}
-    if isinstance(sess.state, dict) and "score" in sess.state:
-        result["score"] = sess.state["score"]
-    seed = sess.seed
-    replay = {"schema_version": 1,
-              "game_version": getattr(sess, "game_version", None),
-              "seed": seed,
-              "options": getattr(sess, "env_options", None),
-              "moves": sess.moves}
+def insert_v2(uid: str, game: str, kind: str, version: str | None, mode: str,
+              visibility: str, clock: dict, players: list, models: list,
+              status: str, created_at: float) -> int:
     conn = _db()
     try:
         cur = conn.execute(
-            "INSERT INTO matches (game, kind, players, models, status, result, "
-            "replay, created_at, finished_at) VALUES (?,?,?,?,?,?,?,?,?)",
-            (sess.game, "pve", json.dumps(players), "[]", "finished",
-             json.dumps(result), json.dumps(replay),
-             sess.created_at, time.time()))
+            "INSERT INTO matches (game, kind, players, models, status, created_at, "
+            "uid, mode, visibility, version, clock) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (game, kind, json.dumps(players), json.dumps(models), status, created_at,
+             uid, mode, visibility, version, json.dumps(clock)))
         conn.commit()
         return cur.lastrowid
     finally:
         conn.close()
 
 
+def update_v2(row_id: int, **fields) -> None:
+    """status / kind / players / models / result / finished_at / frames."""
+    allowed = {"status", "kind", "players", "models", "result", "finished_at", "frames"}
+    assert set(fields) <= allowed, set(fields) - allowed
+    values = [json.dumps(v) if k in ("players", "models", "result") else v
+              for k, v in fields.items()]
+    conn = _db()
+    try:
+        conn.execute(f"UPDATE matches SET {', '.join(f'{k}=?' for k in fields)} WHERE id=?",
+                     (*values, row_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def save_seats(row_id: int, seats: list[tuple[str, int | None, dict]]) -> None:
+    conn = _db()
+    try:
+        conn.execute("DELETE FROM match_seats WHERE match_id=?", (row_id,))
+        conn.executemany(
+            "INSERT INTO match_seats (match_id, seat, user_id, controller) VALUES (?,?,?,?)",
+            [(row_id, seat, uid, json.dumps(ctl)) for seat, uid, ctl in seats])
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_v2(uid: str) -> dict | None:
+    """One v2 match record with its seats, or None."""
+    conn = _db()
+    try:
+        row = conn.execute(
+            "SELECT id, game, kind, players, models, status, result, created_at, "
+            "finished_at, uid, mode, visibility, version, clock, frames "
+            "FROM matches WHERE uid=?", (uid,)).fetchone()
+        if row is None:
+            return None
+        seats = conn.execute(
+            "SELECT seat, user_id, controller FROM match_seats WHERE match_id=? "
+            "ORDER BY seat", (row[0],)).fetchall()
+    finally:
+        conn.close()
+    return {"row_id": row[0], "game": row[1], "kind": row[2],
+            "players": json.loads(row[3] or "[]"), "models": json.loads(row[4] or "[]"),
+            "status": row[5], "result": json.loads(row[6]) if row[6] else None,
+            "created_at": row[7], "finished_at": row[8], "uid": row[9], "mode": row[10],
+            "visibility": row[11], "version": row[12],
+            "clock": json.loads(row[13]) if row[13] else None, "frames": row[14],
+            "seats": [{"seat": s, "user_id": u, "controller": json.loads(c)}
+                      for s, u, c in seats]}
+
+
+def frames_path(uid: str) -> Path:
+    return SCORES_DB.parent / "replays" / f"{uid}.jsonl.gz"
+
+
+def write_frames(uid: str, frames: list[dict]) -> str:
+    """Seal a finished match's frames: one JSON object per line, gzip."""
+    path = frames_path(uid)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    with gzip.open(tmp, "wt", encoding="utf-8") as fh:
+        for frame in frames:
+            fh.write(json.dumps(frame, ensure_ascii=False, separators=(",", ":")) + "\n")
+    tmp.replace(path)
+    return str(path)
+
+
+def read_frames(path: str) -> list[dict]:
+    with gzip.open(path, "rt", encoding="utf-8") as fh:
+        return [json.loads(line) for line in fh if line.strip()]
+
+
+def abort_unfinished_v2(cause: str = "server_restart") -> int:
+    """Live v2 matches exist only in memory (D12): on boot they are gone, so
+    their rows become aborted instead of silently disappearing."""
+    conn = _db()
+    try:
+        cur = conn.execute(
+            "UPDATE matches SET status='aborted', result=?, finished_at=? "
+            "WHERE uid IS NOT NULL AND status IN ('waiting', 'active')",
+            (json.dumps({"winner": None, "cause": cause}), time.time()))
+        conn.commit()
+        return cur.rowcount
+    finally:
+        conn.close()
+
+
+# ------------------------------------------------------------------ history
+
 def get_match(match_id: int) -> dict | None:
     conn = _db()
     try:
-        row = conn.execute("SELECT * FROM matches WHERE id=?", (match_id,)).fetchone()
+        cur = conn.execute("SELECT * FROM matches WHERE id=?", (match_id,))
+        row = cur.fetchone()
+        columns = [d[0] for d in cur.description] if cur.description else None
     finally:
         conn.close()
-    return _row(row) if row else None
-
-
-def get_match_replay(match_id: int) -> dict | None:
-    """Normalize one finished match into the public replay contract.
-
-    The viewer initializes ``seed`` through the Environment API and applies
-    ``moves`` in order. Legacy rows stored as a plain move list remain readable
-    with ``seed=None``.
-    """
-    m = get_match(match_id)
-    if m is None or m["status"] != "finished":
-        return None
-    raw = m.get("replay") or []
-    game_version, seed, options, moves = None, None, None, raw
-    if isinstance(raw, dict):
-        game_version = raw.get("game_version")
-        seed = raw.get("seed")
-        options = raw.get("options")
-        moves = raw.get("moves") or []
-    result = m.get("result") or {}
-    return {"schema_version": 1,
-            "match_id": m["id"], "game": m["game"], "kind": m["kind"],
-            "game_version": game_version,
-            "players": m["players"],
-            "models": m["models"],
-            "result": result,
-            "mode": result.get("mode") if isinstance(result, dict) else None,
-            "seed": seed, "options": options, "moves": moves,
-            "created_at": m["created_at"],
-            "finished_at": m["finished_at"]}
-
-
-
+    return _row(row, columns) if row else None
 
 
 def top_ratings(game: str, limit: int = 20) -> list[dict]:
@@ -261,134 +306,19 @@ def top_ratings(game: str, limit: int = 20) -> list[dict]:
 
 
 def list_matches(user_id: int) -> list[dict]:
-    """Matches where the user played or owns a participating model."""
+    """Matches where the user played (v2 seats are projected into players)."""
     conn = _db()
     try:
-        rows = conn.execute(
+        cur = conn.execute(
             "SELECT * FROM matches WHERE status != 'queued' ORDER BY id DESC "
-            "LIMIT 200").fetchall()
+            "LIMIT 200")
+        rows = cur.fetchall()
+        columns = [d[0] for d in cur.description] if cur.description else None
     finally:
         conn.close()
     out = []
     for r in rows:
-        m = _row(r)
-        mine = any(p.get("user_id") == user_id for p in m["players"]) \
-            or user_id in [mod.get("owner_id") for mod in (m.get("model_meta") or [])]
-        if mine:
+        m = _row(r, columns)
+        if any(p.get("user_id") == user_id for p in m["players"]):
             out.append(m)
     return out
-
-
-# ------------------------------------------------------- model vs model worker
-
-def create_model_match(game: str, principal: dict, model_a: int, model_b) -> int:
-    """model_b: model id (int) or "ai:<strategy>". Returns match id.
-
-    13 G3：能力声明制——游戏需声明模型契约；ai: 对手需声明 opponents；
-    模型 vs 模型需声明 pvp_options（双人模式开局）。"""
-    if not inference.supports_models(game):
-        raise ValueError(f"游戏 {game!r} 未声明模型契约，不支持模型对战")
-    adapter = GAMES[game]
-    ma = model_store.get_model(int(model_a))
-    if ma is None or ma["status"] != "active" or ma["owner_id"] != principal["id"]:
-        raise ValueError("model_a 不存在或不是你的模型")
-    model_meta = [{"type": "model", "side": "p0",
-                   "model_id": ma["id"], "name": ma["name"],
-                   "owner_id": ma["owner_id"]}]
-    opponent_desc = None
-    if isinstance(model_b, str) and model_b.startswith("ai:"):
-        strategy = model_b[3:]
-        opponents = getattr(adapter, "opponents", None) or []
-        if strategy not in opponents:
-            raise ValueError(f"unknown strategy {strategy!r} "
-                             f"(choose from {opponents})")
-        opponent_desc = {"type": "ai", "strategy": strategy}
-        model_meta.append({"type": "ai", "side": "p1",
-                           "strategy": strategy})
-    else:
-        if not getattr(adapter, "pvp_options", None):
-            raise ValueError(f"游戏 {game!r} 不支持模型 vs 模型（未声明双人模式）")
-        mb = model_store.get_model(int(model_b))
-        if mb is None or mb["status"] != "active":
-            raise ValueError("model_b 不存在")
-        opponent_desc = {"type": "model", "model_id": mb["id"]}
-        model_meta.append({"type": "model", "side": "p1",
-                           "model_id": mb["id"], "name": mb["name"],
-                           "owner_id": mb["owner_id"]})
-
-    conn = _db()
-    try:
-        cur = conn.execute(
-            "INSERT INTO matches (game, kind, players, models, status, created_at) "
-            "VALUES (?,?,?,?,?,?)",
-            (game, "model_vs_model",
-             json.dumps([{"user_id": principal["id"],
-                          "name": principal["nickname"] or principal["username"],
-                          "side": "owner"}]),
-             json.dumps(model_meta), "queued", time.time()))
-        conn.commit()
-        match_id = cur.lastrowid
-    finally:
-        conn.close()
-
-    t = threading.Thread(target=_run_model_match, args=(match_id, game, ma,
-                                                        opponent_desc, adapter.meta.get("version")),
-                         daemon=True)
-    t.start()
-    return match_id
-
-
-def _run_model_match(match_id: int, game: str, model_a: dict, opponent: dict,
-                     game_version: str | None = None) -> None:
-    with MATCH_WORKER_LIMIT:
-        conn = _db()
-        try:
-            conn.execute("UPDATE matches SET status='running' WHERE id=?",
-                         (match_id,))
-            conn.commit()
-        finally:
-            conn.close()
-        try:
-            adapter = resolve(game, game_version)
-            seed = int(time.time_ns() % (1 << 30))
-            options = getattr(adapter, "pvp_options", None)
-            meta = getattr(adapter, "meta", None) or {}
-            game_version = meta.get("version")
-            state = adapter.new_state(seed, options)
-            sess_a = model_store.load_session(model_a)
-            sess_b = None
-            if opponent["type"] == "model":
-                model_b = model_store.get_model(int(opponent["model_id"]))
-                sess_b = model_store.load_session(model_b)
-            moves = []
-            for _ in range(MATCH_STEP_CAP):
-                if state.get("done"):
-                    break
-                a = inference.model_action(game, sess_a, state, owner=0, adapter=adapter)
-                if opponent["type"] == "model":
-                    b = inference.model_action(game, sess_b, state, owner=1, adapter=adapter)
-                else:
-                    b = adapter.opponent_action(
-                        state, {"type": "ai", "strategy": opponent["strategy"]})
-                moves.append({"tick": state.get("tick", 0), "action": {"p0": a, "p1": b}})
-                state = adapter.step_state(state, {"p0": a, "p1": b})
-            result = {"winner": state.get("winner"), "cause": state.get("cause"),
-                      "damage": state.get("damage", [0, 0]),
-                      "tick": state.get("tick", 0)}
-            status = "finished"
-        except Exception as e:  # model failure -> record and mark failed
-            result = {"error": str(e)}
-            status = "failed"
-        conn = _db()
-        try:
-            replay = {"schema_version": 1, "game_version": game_version,
-                      "seed": seed, "options": options, "moves": moves} \
-                if "moves" in dir() and "seed" in dir() else []
-            conn.execute(
-                "UPDATE matches SET status=?, result=?, replay=?, finished_at=? "
-                "WHERE id=?", (status, json.dumps(result),
-                               json.dumps(replay),
-                               time.time(), match_id))
-            conn.commit()
-        finally:
-            conn.close()
