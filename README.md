@@ -7,7 +7,7 @@
 - **平台能力（v1.0）**：账号/游客、资料/好友/对局聊天（并入 SSE）/通知（轮询落库）、XP/等级/战绩墙/总榜周榜、公告/举报/管理后台、SQLite 备份脚本
 - **模型生态**：ONNX 托管（契约校验）、评估、模型 vs 模型 / vs 内置 AI
 - **渲染 v2（2026-09）**：声明式棋盘（精灵/矢量/朝向/归属色/血条/图层/动效/HUD）→ 资源包（PNG/WebP + 音效）
-  → 沙箱自定义渲染器（opaque-origin Worker + OffscreenCanvas，默认关闭）；设计见 `docs/design/16`
+  → 沙箱自定义渲染器（opaque-origin Worker + OffscreenCanvas，默认关闭）；设计见 `docs/design/16-前端渲染能力开放设计.md`
 - **闭环**：SDK 训练（gym 接口，SB3/CleanRL 直接用）→ `export_onnx` → 上传托管 → 网页对局
 
 > 历史 v1.0 五批次（a 对战 → b 身份社交 → c 成长排行 → d 运营 → e 基建）的设计与验收记录
@@ -49,7 +49,7 @@ packaged-games/      官方种子游戏包（snake/tetris/microrts：game.yaml +
 web/                React 18 + Vite + Tailwind + lucide：Lab UI（深/亮双主题，src/lab/）
   src/lab/          tokens.css / LabShell（导航+命令面板+主题）/ 全部页面（总览、环境、模型、对局、试玩、PvP、观战回放、资料、好友、通知、管理、UGC）
   src/components/   UgBoard（通用棋盘门面）
-  src/render/       渲染 v2：schema 归一化/动效/资源/Canvas/DOM/HUD/沙箱宿主（docs/design/16）
+  src/render/       渲染 v2：schema 归一化/动效/资源/Canvas/DOM/HUD/沙箱宿主（docs/design/16-前端渲染能力开放设计.md）
 static-docs/       静态文档：api.html 接口文档 + vendor/（自托管 Swagger/ReDoc）
 sdk/                Python SDK（训练 + 全量 API 客户端）
   gameplatform/remote.py   RemoteVecEnv(game, n, obs_mode)：每槽独立 OpenEnv 连接
